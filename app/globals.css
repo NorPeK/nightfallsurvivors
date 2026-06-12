@@ -1,26 +1,202 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --font-display: "Cinzel", "Times New Roman", serif;
+  --font-ui: "Rajdhani", "Avenir Next", "Segoe UI", system-ui, sans-serif;
+  --gold: #f0c75e;
+  --blood: #c43a3a;
+  --arcane: #8b5cf6;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-display: var(--font-display);
+  --font-ui: var(--font-ui);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+html,
+body {
+  height: 100%;
+  overflow: hidden;
+  margin: 0;
+  background: #06060c;
+  font-family: var(--font-ui);
+  -webkit-tap-highlight-color: transparent;
+  touch-action: none;
+  overscroll-behavior: none;
+}
+
+.font-display {
+  font-family: var(--font-display);
+}
+.font-ui {
+  font-family: var(--font-ui);
+}
+
+/* ---------- shared UI atoms ---------- */
+
+.panel {
+  background: linear-gradient(160deg, rgba(22, 20, 36, 0.96), rgba(10, 9, 20, 0.97));
+  border: 1px solid rgba(240, 199, 94, 0.22);
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.7),
+    0 18px 60px rgba(0, 0, 0, 0.75),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  border-radius: 14px;
+}
+
+.btn-gold {
+  font-family: var(--font-display);
+  letter-spacing: 0.12em;
+  color: #1a1206;
+  background: linear-gradient(180deg, #ffe9a8, #e9b94e 55%, #c98f2c);
+  border: 1px solid #8a6118;
+  box-shadow:
+    0 0 18px rgba(240, 199, 94, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.55);
+  transition:
+    transform 0.08s ease,
+    box-shadow 0.15s ease,
+    filter 0.15s ease;
+}
+.btn-gold:hover {
+  filter: brightness(1.08);
+  box-shadow:
+    0 0 28px rgba(240, 199, 94, 0.55),
+    inset 0 1px 0 rgba(255, 255, 255, 0.55);
+}
+.btn-gold:active {
+  transform: translateY(1px) scale(0.99);
+}
+.btn-gold:disabled {
+  filter: grayscale(0.8) brightness(0.7);
+  cursor: not-allowed;
+}
+
+.btn-ghost {
+  font-family: var(--font-ui);
+  letter-spacing: 0.08em;
+  color: #cfc6e8;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(180, 160, 255, 0.25);
+  transition: all 0.15s ease;
+}
+.btn-ghost:hover {
+  background: rgba(139, 92, 246, 0.15);
+  border-color: rgba(180, 160, 255, 0.55);
+  color: #fff;
+}
+.btn-ghost:active {
+  transform: translateY(1px);
+}
+
+.title-glow {
+  text-shadow:
+    0 0 18px rgba(196, 58, 58, 0.65),
+    0 0 60px rgba(196, 58, 58, 0.35),
+    0 2px 0 #000;
+}
+
+.gold-text {
+  background: linear-gradient(180deg, #fff3c9, #f0c75e 55%, #b9842b);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* card used for level-up choices / characters */
+.choice-card {
+  position: relative;
+  background: linear-gradient(165deg, rgba(30, 27, 50, 0.95), rgba(12, 11, 24, 0.98));
+  border: 1px solid rgba(150, 130, 220, 0.25);
+  border-radius: 12px;
+  transition:
+    transform 0.12s ease,
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
+  cursor: pointer;
+}
+.choice-card:hover,
+.choice-card.selected {
+  transform: translateY(-3px);
+  border-color: rgba(240, 199, 94, 0.8);
+  box-shadow:
+    0 0 24px rgba(240, 199, 94, 0.25),
+    0 14px 40px rgba(0, 0, 0, 0.6);
+}
+.choice-card.is-new {
+  border-color: rgba(110, 231, 183, 0.5);
+}
+.choice-card.is-evo {
+  border-color: rgba(244, 114, 182, 0.65);
+  box-shadow: 0 0 30px rgba(244, 114, 182, 0.25);
+}
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes pulseGlow {
+  0%,
+  100% {
+    opacity: 0.85;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+@keyframes bossShake {
+  0%,
+  100% {
+    transform: translate(0, 0);
+  }
+  25% {
+    transform: translate(-2px, 1px);
+  }
+  75% {
+    transform: translate(2px, -1px);
+  }
+}
+@keyframes slowSpin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+.anim-fade-in-up {
+  animation: fadeInUp 0.35s ease both;
+}
+.anim-fade-in {
+  animation: fadeIn 0.3s ease both;
+}
+.anim-pulse-glow {
+  animation: pulseGlow 1.6s ease-in-out infinite;
+}
+
+/* scrollbars inside panels */
+.nice-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+.nice-scroll::-webkit-scrollbar-thumb {
+  background: rgba(240, 199, 94, 0.3);
+  border-radius: 8px;
+}
+.nice-scroll::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.03);
 }
