@@ -1,0 +1,2 @@
+# Exclude the self-contained offline build from language stats
+game.html linguist-vendored
