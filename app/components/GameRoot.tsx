@@ -1,269 +1,410 @@
 "use client";
 
-// NORPEK: Nightfall Survivors — React shell: canvas host + all UI screens.
-
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Game } from "../game/engine";
-import { renderGame } from "../game/render";
+import { renderGame, combatViewport } from "../game/render";
 import { Input } from "../game/input";
 import { audio } from "../game/audio";
-import { loadSave, writeSave, statsWithMeta } from "../game/meta";
-import {
-  CHARACTERS,
-  META_UPGRADES,
-  metaUpgradeCost,
-  GAME_DURATION,
-} from "../game/data";
-import type {
-  CharacterId,
-  GamePhase,
-  HudState,
-  MetaSave,
-  UpgradeOption,
-  ChestReward,
-  RunStats,
-} from "../game/types";
+import { platform } from "../game/platform";
+import { loadProfile, saveProfile, saveProfileOnPause, createDefaultProfile, statsWithMeta, updateSettings, purchaseUpgrade, refundUpgrades, beginRun, checkpointRun, settleRun, withRunSnapshot, setProfileMuted, recoverProfileBackup, ACHIEVEMENTS, type ProfileSave } from "../game/meta";
+import { DEFAULT_SETTINGS, type GameSettings } from "../game/settings";
+import { CHARACTERS, WEAPONS, PASSIVES, META_UPGRADES, metaUpgradeCost, BASE_STATS } from "../game/data";
+import type { CharacterId, GamePhase, HudState, UpgradeOption, ChestReward, RunStats, CovenantOption, RunPhase } from "../game/types";
 
-function fmtTime(t: number) {
-  const m = Math.floor(t / 60);
-  const s = Math.floor(t % 60);
-  return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
-}
+const fmtTime = (t: number) => `${Math.floor(t / 60).toString().padStart(2, "0")}:${Math.floor(t % 60).toString().padStart(2, "0")}`;
+const gold = (n: number) => Math.floor(n).toLocaleString();
+const HUNTER_ROLES: Record<CharacterId, { role: string; sigil: string }> = {
+  knight: { role: "Enduring guardian", sigil: "♜" }, ranger: { role: "Mobile marksman", sigil: "➶" },
+  mage: { role: "Arcane controller", sigil: "✧" }, reaper: { role: "Close-range reaper", sigil: "☾" },
+};
+type Panel = "settings" | "journal" | "build" | "end-run" | "refund" | "run-error" | "end-saved" | "reload-save" | null;
 
 export default function GameRoot() {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const wrapRef = useRef<HTMLDivElement>(null);
-  const gameRef = useRef<Game | null>(null);
-  const inputRef = useRef<Input | null>(null);
-
+  const canvasRef = useRef<HTMLCanvasElement>(null), wrapRef = useRef<HTMLDivElement>(null);
+  const gameRef = useRef<Game | null>(null), inputRef = useRef<Input | null>(null);
+  const profileRef = useRef<ProfileSave | null>(null);
+  const settingsRef = useRef<GameSettings>(DEFAULT_SETTINGS);
+  const phaseRef = useRef<GamePhase>("menu"), panelRef = useRef<Panel>(null);
+  const suspendedRef = useRef(false);
+  const wakeCanvasRef = useRef<() => void>(() => {});
+  const qaRef = useRef(false);
+  const [qaMode, setQaMode] = useState(false);
+  const [profile, setProfile] = useState<ProfileSave | null>(null);
+  const [loadError, setLoadError] = useState("");
+  const [startupAttempt, setStartupAttempt] = useState(0);
+  const [backupAvailable, setBackupAvailable] = useState(false);
+  const [runError, setRunError] = useState("");
+  const [saveError, setSaveError] = useState("");
+  const [saveConflict, setSaveConflict] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [phase, setPhase] = useState<GamePhase>("menu");
-  const phaseRef = useRef<GamePhase>("menu");
-  const [save, setSave] = useState<MetaSave | null>(null);
+  const [panel, setPanelState] = useState<Panel>(null);
   const [hud, setHud] = useState<HudState | null>(null);
   const [options, setOptions] = useState<UpgradeOption[]>([]);
-  const [chestRewards, setChestRewards] = useState<ChestReward[]>([]);
-  const [runStats, setRunStats] = useState<RunStats | null>(null);
-  const [bossWarn, setBossWarn] = useState<{ name: string; title: string } | null>(null);
-  const [selChar, setSelChar] = useState<CharacterId>("knight");
+  const [rewards, setRewards] = useState<ChestReward[]>([]);
+  const [covenants, setCovenants] = useState<CovenantOption[]>([]);
+  const [result, setResult] = useState<RunStats | null>(null);
+  const [selected, setSelected] = useState<CharacterId>("knight");
+  const [notice, setNotice] = useState("");
+  const [bossWarning, setBossWarning] = useState("");
+  const [suspended, setSuspended] = useState(false);
+  const [inputDevice, setInputDevice] = useState<"keyboard" | "pointer">("keyboard");
+  const settings = profile?.settings ?? DEFAULT_SETTINGS;
+  const hasProfile = Boolean(profile), bossActive = Boolean(hud?.boss);
 
-  const setPhaseBoth = useCallback((p: GamePhase) => {
-    phaseRef.current = p;
-    setPhase(p);
+  const persist = useCallback((next: ProfileSave, options?: { pauseCheckpoint: boolean }) => {
+    profileRef.current = next; settingsRef.current = next.settings; setProfile(next);
+    if (qaRef.current) { setSaving(false); return; }
+    setSaving(true);
+    void (options?.pauseCheckpoint ? saveProfileOnPause(next) : saveProfile(next)).then(() => { if (profileRef.current?.revision === next.revision) { setSaveError(""); setSaveConflict(false); } }).catch((error: unknown) => {
+      if (profileRef.current?.revision !== next.revision) return;
+      setSaveError(error instanceof Error ? error.message : "Progress could not be saved.");
+      setSaveConflict(current => current || (error instanceof Error && error.name === "SaveConflictError"));
+    }).finally(() => { if (profileRef.current?.revision === next.revision) setSaving(false); });
+  }, []);
+  const changeSettings = useCallback((patch: Partial<GameSettings>) => {
+    const p = profileRef.current; if (p) persist(updateSettings(p, patch));
+  }, [persist]);
+  const setPanel = useCallback((next: Panel) => { panelRef.current = next; setPanelState(next); inputRef.current?.reset(); }, []);
+  const changePhase = useCallback((next: GamePhase) => {
+    phaseRef.current = next; setPhase(next); inputRef.current?.setEnabled(next === "playing" && !suspendedRef.current);
+    wakeCanvasRef.current();
+  }, []);
+  const load = useCallback(async () => {
+    if (qaRef.current) {
+      const sandbox = createDefaultProfile(); sandbox.gold = 100000; sandbox.settings.onboardingComplete = true;
+      profileRef.current = sandbox; settingsRef.current = sandbox.settings; setProfile(sandbox); setSelected("knight"); return;
+    }
+    const loaded = await loadProfile();
+    setBackupAvailable(Boolean(loaded.backup));
+    if (loaded.status !== "ready" || !loaded.profile) { setLoadError(loaded.error ?? "Your progress could not be loaded. Retry before playing."); return; }
+    if (loaded.warning) setNotice(loaded.warning);
+    const p = loaded.profile;
+    profileRef.current = p; settingsRef.current = p.settings; setProfile(p); setSelected(p.settings.lastHunter);
   }, []);
 
-  // ---- init engine once
   useEffect(() => {
-    const s = loadSave();
-    setSave(s);
-    audio.muted = s.muted;
-
-    const input = new Input();
-    inputRef.current = input;
-    if (wrapRef.current) input.attach(wrapRef.current);
-
+    qaRef.current = process.env.NODE_ENV !== "production" && new URLSearchParams(window.location.search).get("debug") === "1";
+    queueMicrotask(() => setQaMode(qaRef.current));
+    try { platform.init(); } catch (error) { const message = error instanceof Error ? error.message : "The platform could not initialize. Check the connection and retry."; queueMicrotask(() => setLoadError(message)); return; }
+    const input = new Input(); inputRef.current = input;
+    input.setEnabled(false); if (wrapRef.current) input.attach(wrapRef.current);
+    input.onDeviceChange = setInputDevice;
+    let warningUntil = 0;
+    let alive = true, raf = 0, lastSnapshotTime = -15, renderFault = false;
+    const snapshot = (p: ProfileSave) => {
+      const g = gameRef.current; if (!g || qaRef.current) return p;
+      try { return withRunSnapshot(p, g.runId, g.exportSnapshot()); }
+      catch { setNotice("Run checkpoint unavailable. Earned permanent rewards are still saved."); return p; }
+    };
+    const checkpoint = (stats: RunStats) => {
+      const p = profileRef.current; if (!p) return;
+      let next = checkpointRun(p, stats.runId, stats.gold, stats);
+      const elapsed = gameRef.current?.time ?? stats.time;
+      if (elapsed - lastSnapshotTime >= 15) { next = snapshot(next); lastSnapshotTime = elapsed; }
+      if (next !== p) persist(next);
+    };
     const game = new Game(input, {
-      onPhaseChange: (p) => {
-        // engine phases map directly; menus are React-side
-        setPhaseBoth(p);
-      },
-      onHud: (h) => setHud(h),
-      onLevelUp: (opts) => setOptions(opts),
-      onChest: (r) => setChestRewards(r),
+      onPhaseChange: (next) => {
+        changePhase(next);
+        if (next === "paused" && profileRef.current) persist(snapshot(profileRef.current));
+      }, onHud: (h) => { setHud(h); if (warningUntil && (gameRef.current?.time ?? 0) >= warningUntil) { setBossWarning(""); warningUntil = 0; } }, onLevelUp: setOptions, onChest: setRewards,
+      onRunStart: (runId, hunter) => { renderFault = false; setBossWarning(""); warningUntil = 0; lastSnapshotTime = -15; const p = profileRef.current; if (p) persist(beginRun(p, runId, hunter)); },
+      onError: (message) => { platform.reportError(); setRunError(message); setPanel("run-error"); input.reset(); audio.setSuspended(true); },
+      onEvolutionChoice: setOptions, onCovenant: setCovenants, onProgress: checkpoint,
       onRunEnd: (stats) => {
-        setRunStats(stats);
-        setSave((prev) => {
-          if (!prev) return prev;
-          const next: MetaSave = {
-            ...prev,
-            gold: prev.gold + stats.gold,
-            totalKills: prev.totalKills + stats.kills,
-            bestTime: Math.max(prev.bestTime, stats.time),
-            wins: prev.wins + (stats.won ? 1 : 0),
-            runs: prev.runs + 1,
-          };
-          writeSave(next);
-          return next;
-        });
-        audio.stopMusic();
+        setResult(stats); setPanel(null); audio.stopMusic();
+        const p = profileRef.current;
+        if (p) persist(settleRun(p, stats.runId, stats, { hunter: stats.character, outcome: stats.won ? "won" : stats.abandoned ? "abandoned" : "died", weapons: stats.weaponIds, evolutions: stats.metrics.evolutions, cause: stats.cause }));
       },
-      onBossWarning: (name, title) => {
-        setBossWarn({ name, title });
-        setTimeout(() => setBossWarn(null), 3200);
+      onBossWarning: (name) => {
+        setBossWarning(name); warningUntil = (gameRef.current?.time ?? 0) + 3.2;
       },
     });
+    game.debug = qaRef.current;
     gameRef.current = game;
-
     input.onPause = () => {
-      const g = gameRef.current;
-      if (!g) return;
-      if (phaseRef.current === "playing") g.pause();
-      else if (phaseRef.current === "paused") g.resume();
+      if (suspendedRef.current) return;
+      if (panelRef.current) { setPanel(null); return; }
+      if (phaseRef.current === "playing") game.pause();
+      else if (phaseRef.current === "paused") game.resume();
     };
-
-    // debug mode: ?debug=1 → T +60s, Y +290s, X +xp, K kill all, B melt boss
-    let debugKeys: ((e: KeyboardEvent) => void) | null = null;
-    if (new URLSearchParams(window.location.search).has("debug")) {
-      game.debug = true;
-      (window as unknown as { __game?: Game }).__game = game;
-      debugKeys = (e: KeyboardEvent) => {
-        const k = e.key.toLowerCase();
-        if (k === "t") game.debugSkip(60);
-        if (k === "y") game.debugSkip(290);
-        if (k === "x") game.gainXp(50);
-        if (k === "k") game.debugKillAll();
-        if (k === "b") game.debugMeltBoss();
-      };
-      window.addEventListener("keydown", debugKeys);
-    }
-
-    // render loop (always running so paused frames still draw)
-    let raf = 0;
     const ctx = canvasRef.current?.getContext("2d");
+    // Coalesce invalidations; frozen scenes need one repaint, not a second game loop.
+    const wake = () => { if (alive && !suspendedRef.current && !raf) raf = requestAnimationFrame(draw); };
     const draw = () => {
+      raf = 0;
+      if (!alive || suspendedRef.current) return;
       const canvas = canvasRef.current;
       if (canvas && ctx) {
+        const width = wrapRef.current?.clientWidth ?? window.innerWidth, height = wrapRef.current?.clientHeight ?? window.innerHeight;
         const dpr = Math.min(2, window.devicePixelRatio || 1);
-        const w = window.innerWidth;
-        const h = window.innerHeight;
-        if (canvas.width !== Math.floor(w * dpr) || canvas.height !== Math.floor(h * dpr)) {
-          canvas.width = Math.floor(w * dpr);
-          canvas.height = Math.floor(h * dpr);
-          canvas.style.width = `${w}px`;
-          canvas.style.height = `${h}px`;
+        if (canvas.width !== Math.floor(width * dpr) || canvas.height !== Math.floor(height * dpr)) {
+          canvas.width = Math.floor(width * dpr); canvas.height = Math.floor(height * dpr);
+          const viewport = combatViewport(width, height); game.setViewport(viewport.width, viewport.height);
         }
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         const p = phaseRef.current;
         try {
-          if (p === "menu" || p === "characters" || p === "shop" || p === "howto") {
-            drawMenuBackdrop(ctx, w, h, performance.now() / 1000);
-          } else if (gameRef.current) {
-            renderGame(gameRef.current, ctx, w, h);
+          if (["menu", "characters", "shop", "howto"].includes(p)) {
+            if (!renderFault) drawMenuBackdrop(ctx, width, height, settingsRef.current.reducedMotion ? 0 : performance.now() / 1000);
+            else { ctx.fillStyle = "#090a12"; ctx.fillRect(0, 0, width, height); }
           }
-        } catch (err) {
-          // one bad frame must never kill the render loop
-          console.error("render error", err);
+          else if (!renderFault) renderGame(game, ctx, width, height, settingsRef.current);
+        } catch {
+          renderFault = true; platform.reportError();
+          if (!["menu", "characters", "shop", "howto", "gameover", "victory"].includes(p)) {
+            game.setSuspended("error", true); input.reset(); audio.setSuspended(true);
+            setRunError("The battlefield could not be drawn. End this attempt to return safely."); setPanel("run-error");
+          } else setNotice("The animated background is unavailable. Menus remain usable.");
         }
       }
-      raf = requestAnimationFrame(draw);
+      const p = phaseRef.current;
+      const animate = p === "playing" ? !game.suspended : ["menu", "characters", "shop", "howto"].includes(p) && !settingsRef.current.reducedMotion;
+      if (!renderFault && !panelRef.current && animate) wake();
     };
-    raf = requestAnimationFrame(draw);
-
+    wakeCanvasRef.current = wake;
+    const resizeObserver = new ResizeObserver(wake);
+    if (wrapRef.current) resizeObserver.observe(wrapRef.current);
+    window.addEventListener("resize", wake);
+    const suspend = () => {
+      suspendedRef.current = true; setSuspended(true); game.setSuspended("platform", true); input.reset(); audio.setSuspended(true); cancelAnimationFrame(raf);
+      raf = 0;
+      // Reward checkpoints are emitted by the engine; snapshots are captured at the same suspension boundary.
+      const p = profileRef.current;
+      if (p && game.runId && !["menu", "characters", "shop", "howto", "gameover", "victory"].includes(phaseRef.current)) {
+        persist(snapshot(checkpointRun(p, game.runId, game.hudSnapshot().gold)), { pauseCheckpoint: true });
+      }
+    };
+    const resume = () => {
+      suspendedRef.current = false; setSuspended(false); game.setSuspended("platform", false);
+      input.setEnabled(phaseRef.current === "playing"); audio.setSuspended(phaseRef.current === "paused" || panelRef.current === "run-error");
+      wake();
+    };
+    const unsubscribes = [platform.onPause(suspend), platform.onResume(resume), platform.onAudioChanged((enabled) => audio.setPlatformEnabled(enabled))];
+    audio.setPlatformEnabled(platform.audioEnabled);
+    if (platform.suspended) suspend(); else wake();
+    let paintedFrame = 0;
+    const readyFrame = requestAnimationFrame(() => { paintedFrame = requestAnimationFrame(() => { if (alive) platform.firstFrameReady(); }); });
+    queueMicrotask(() => { if (alive) void load(); });
     return () => {
-      cancelAnimationFrame(raf);
-      if (debugKeys) window.removeEventListener("keydown", debugKeys);
-      game.stop();
-      input.detach();
+      alive = false; cancelAnimationFrame(raf); cancelAnimationFrame(readyFrame); cancelAnimationFrame(paintedFrame);
+      wakeCanvasRef.current = () => {}; resizeObserver.disconnect(); window.removeEventListener("resize", wake);
+      unsubscribes.forEach((unsubscribe) => unsubscribe()); input.detach(); game.dispose(); audio.dispose();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [changePhase, load, persist, setPanel, startupAttempt]);
 
-  // ---- actions
-  const startRun = (charId: CharacterId) => {
-    const g = gameRef.current;
-    if (!g || !save) return;
-    audio.resume();
-    audio.startMusic();
-    setRunStats(null);
-    setHud(null);
-    g.startRun(charId, statsWithMeta(save));
+  useEffect(() => {
+    settingsRef.current = settings;
+    audio.setVolumes(settings.musicVolume, settings.sfxVolume);
+    audio.setMuted(platform.isPlayables ? false : (profile?.muted ?? false));
+    inputRef.current?.configure(settings.joystickMode, settings.joystickSide);
+    wakeCanvasRef.current();
+  }, [settings, profile?.muted]);
+  useEffect(() => { wakeCanvasRef.current(); }, [phase, panel]);
+  useEffect(() => {
+    audio.setSuspended(suspended || phase === "paused" || Boolean(runError));
+    audio.setIntensity(phase === "victory" ? "dawn" : bossActive ? "boss" : phase === "menu" ? "menu" : "hunt");
+  }, [phase, suspended, bossActive, runError]);
+  useEffect(() => { if (hasProfile && gameRef.current) { let painted = 0; const id = requestAnimationFrame(() => { painted = requestAnimationFrame(() => platform.gameReady()); }); return () => { cancelAnimationFrame(id); cancelAnimationFrame(painted); }; } }, [hasProfile]);
+  useEffect(() => { if (!notice || suspended) return; const id = setTimeout(() => setNotice(""), 3500); return () => clearTimeout(id); }, [notice, suspended]);
+
+  const start = (hunter: CharacterId) => {
+    const p = profileRef.current, game = gameRef.current; if (!p || !game || suspended) return;
+    setPanel(null); setResult(null); setRunError(""); setHud(null); audio.resume(); audio.startMusic();
+    game.startRun(hunter, statsWithMeta(p));
+    setSelected(hunter);
   };
-
-  const buyUpgrade = (id: string) => {
-    if (!save) return;
-    const def = META_UPGRADES.find((u) => u.id === id)!;
-    const lvl = save.upgrades[id] ?? 0;
-    const cost = metaUpgradeCost(def, lvl);
-    if (lvl >= def.maxLevel || save.gold < cost) return;
-    audio.resume();
-    audio.sfx("gold");
-    const next = { ...save, gold: save.gold - cost, upgrades: { ...save.upgrades, [id]: lvl + 1 } };
-    writeSave(next);
-    setSave(next);
+  const backToMenu = () => { gameRef.current?.stop(); audio.stopMusic(); setPanel(null); changePhase("menu"); };
+  const buy = (id: string) => {
+    const p = profileRef.current; if (!p) return;
+    const purchase = purchaseUpgrade(p, id);
+    if (purchase.ok) { persist(purchase.profile); audio.resume(); audio.sfx("gold"); setNotice("Power-up purchased. Your next hunt begins stronger."); }
+    else setNotice(purchase.error ?? "This power-up cannot be purchased.");
   };
-
-  const toggleMute = () => {
-    if (!save) return;
-    const next = { ...save, muted: !save.muted };
-    writeSave(next);
-    setSave(next);
-    audio.setMuted(next.muted);
+  const pick = (option: UpgradeOption) => {
+    if (phase === "evolution") gameRef.current?.chooseEvolution(option.id);
+    else gameRef.current?.applyUpgrade(option);
+    if (!settings.onboardingComplete) changeSettings({ onboardingComplete: true });
   };
+  const inRun = !["menu", "characters", "shop", "howto"].includes(phase);
+  const showOnboarding = phase === "playing" && !settings.onboardingComplete;
 
-  const quitToMenu = () => {
-    audio.stopMusic();
-    gameRef.current?.stop();
-    setPhaseBoth("menu");
-  };
-
-  const inRun = ["playing", "levelup", "chest", "paused", "gameover", "victory"].includes(phase);
-
-  return (
-    <div ref={wrapRef} className="fixed inset-0 overflow-hidden bg-[#06060c]">
-      <canvas ref={canvasRef} className="absolute inset-0" />
-
-      {/* ---------- HUD ---------- */}
-      {inRun && hud && phase !== "gameover" && phase !== "victory" && (
-        <Hud hud={hud} onPause={() => gameRef.current?.pause()} />
-      )}
-
-      {/* boss warning banner */}
-      {bossWarn && (
-        <div className="pointer-events-none absolute inset-x-0 top-[30%] z-30 flex flex-col items-center anim-fade-in">
-          <div className="font-display text-3xl sm:text-5xl font-black tracking-[0.18em] text-red-500 title-glow" style={{ animation: "bossShake 0.25s linear infinite" }}>
-            {bossWarn.name}
-          </div>
-          <div className="font-display mt-2 text-sm sm:text-lg tracking-[0.35em] text-red-200/80 uppercase">{bossWarn.title}</div>
-          <div className="mt-3 h-px w-64 bg-gradient-to-r from-transparent via-red-500 to-transparent" />
-        </div>
-      )}
-
-      {/* ---------- screens ---------- */}
-      {phase === "menu" && save && (
-        <MainMenu
-          save={save}
-          onPlay={() => setPhaseBoth("characters")}
-          onShop={() => setPhaseBoth("shop")}
-          onHowTo={() => setPhaseBoth("howto")}
-          onMute={toggleMute}
-        />
-      )}
-      {phase === "characters" && (
-        <CharacterSelect
-          sel={selChar}
-          onSel={setSelChar}
-          onBack={() => setPhaseBoth("menu")}
-          onStart={() => startRun(selChar)}
-        />
-      )}
-      {phase === "shop" && save && (
-        <Shop save={save} onBuy={buyUpgrade} onBack={() => setPhaseBoth("menu")} />
-      )}
-      {phase === "howto" && <HowTo onBack={() => setPhaseBoth("menu")} />}
-
-      {phase === "levelup" && (
-        <LevelUpModal options={options} onPick={(o) => gameRef.current?.applyUpgrade(o)} level={hud?.level ?? 1} />
-      )}
-      {phase === "chest" && <ChestModal rewards={chestRewards} onClose={() => gameRef.current?.ackChest()} />}
-      {phase === "paused" && hud && (
-        <PauseModal
-          hud={hud}
-          muted={save?.muted ?? false}
-          onResume={() => gameRef.current?.resume()}
-          onQuit={quitToMenu}
-          onMute={toggleMute}
-        />
-      )}
-      {(phase === "gameover" || phase === "victory") && runStats && (
-        <EndScreen stats={runStats} onRetry={() => setPhaseBoth("characters")} onMenu={quitToMenu} />
-      )}
-    </div>
-  );
+  return <main ref={wrapRef} className="game-root" data-reduced-motion={settings.reducedMotion} data-high-contrast={settings.highContrast} data-suspended={suspended} aria-label="NORPEK: Nightfall Survivors">
+    <canvas ref={canvasRef} className="world-canvas" aria-label="Nightfall battlefield. Move with WASD, arrow keys, or drag. Attacks fire automatically." />
+    <div className="sr-only" role="status" aria-live="polite">{bossWarning ? `${bossWarning} has arrived.` : notice}</div>
+    {!profile && <Screen title={loadError ? "Progress needs attention" : "Gathering the night…"} narrow>
+      <p>{loadError || "Loading your hunter, settings and permanent power-ups."}</p>
+      {loadError && <div className="action-row"><button className="btn-gold" onClick={() => { setLoadError(""); if (!gameRef.current && platform.isPlayables) window.location.reload(); else setStartupAttempt(a => a + 1); }}>Retry loading</button>{backupAvailable && <button className="btn-ghost" onClick={async () => {
+        const recovered = await recoverProfileBackup();
+        if (recovered.status === "ready" && recovered.profile) { profileRef.current = recovered.profile; settingsRef.current = recovered.profile.settings; setProfile(recovered.profile); setSelected(recovered.profile.settings.lastHunter); setLoadError(""); setBackupAvailable(false); setNotice("Backup restored. Some recent progress may be missing."); }
+        else setLoadError(recovered.error ?? "Backup could not be restored.");
+      }}>Replace unreadable save with backup</button>}</div>}
+    </Screen>}
+    {profile && <>
+      {inRun && hud && !["gameover", "victory"].includes(phase) && <Hud hud={hud} onPause={() => gameRef.current?.pause()} />}
+      {bossWarning && phase === "playing" && <div className="boss-warning" aria-hidden="true"><span>HARBINGER APPROACHING</span><strong>{bossWarning}</strong></div>}
+      {!panel && phase === "menu" && <Screen title="NORPEK" eyebrow="NIGHTFALL SURVIVORS" hero>
+        <p className="hero-copy">Hold back the dark. Shape your build. Survive thirty minutes, defeat two harbingers, and face Death to reclaim the dawn.</p>
+        {(profile.activeRun || (profile.rewardLedger && !profile.rewardLedger.settled)) && <div className="panel resume-card"><strong>An unfinished hunt awaits.</strong><p>{profile.activeRun ? "Resume from your last checkpoint, or end this hunt and keep banked gold." : "Your earned rewards are kept, but no resumable checkpoint is available. End this saved hunt before rebuilding your power-ups."}</p><button className="btn-gold" disabled={!profile.activeRun} onClick={() => {
+          const game = gameRef.current; if (!game || !profile.activeRun) return;
+          try { if (!game.importSnapshot(profile.activeRun.state)) throw new Error("Invalid checkpoint"); if (game.phase === "playing") game.pause(); setHud(game.hudSnapshot()); audio.resume(); audio.startMusic(); setNotice("Hunt restored. Continue when you are ready."); }
+          catch { setNotice("This checkpoint cannot be restored. Your permanent progress is preserved."); }
+        }}>Resume hunt</button><button className="btn-text" onClick={() => setPanel("end-saved")}>End saved hunt & keep gold</button></div>}
+        <div className="menu-actions"><button className="btn-gold" onClick={() => changePhase("characters")}>Begin the hunt <span aria-hidden="true">→</span></button>
+          <button className="btn-ghost" onClick={() => changePhase("shop")}>Power-Ups <span>{gold(profile.gold)} gold</span></button>
+          <button className="btn-ghost" onClick={() => setPanel("journal")}>Hunter’s journal</button><button className="btn-ghost" onClick={() => setPanel("settings")}>Settings</button></div>
+        <div className="record-strip"><span>Best <b>{fmtTime(profile.bestTime)}</b></span><span>Slain <b>{profile.totalKills.toLocaleString()}</b></span><span>Dawns <b>{profile.wins}</b></span></div>
+      </Screen>}
+      {!panel && phase === "characters" && <Screen title="Choose your hunter" eyebrow="FOUR PATHS THROUGH THE NIGHT" footer={<><button className="btn-ghost" onClick={backToMenu}>Back</button><button className="btn-gold" onClick={() => start(selected)}>Hunt as {CHARACTERS.find(c => c.id === selected)?.name} →</button></>}>
+        <div className="hunter-grid">{CHARACTERS.map(c => <button key={c.id} aria-pressed={selected === c.id} className={`hunter-card ${selected === c.id ? "selected" : ""}`} onClick={() => setSelected(c.id)}>
+          <span className="hunter-sigil" style={{ color: c.color }} aria-hidden="true">{HUNTER_ROLES[c.id].sigil}</span><span className="hunter-heading"><strong>{c.name}</strong><span>{HUNTER_ROLES[c.id].role}</span></span>
+          <span className="selected-mark" aria-hidden="true">{selected === c.id ? "✓" : "○"}</span><p>{c.desc}</p>
+          <span className="starting-weapon">Starts with {WEAPONS[c.weapon].name}</span>
+          <span className="bonus-list">{c.bonuses.filter(b => !b.startsWith("Starts")).map(b => <span key={b} className={b.startsWith("-") ? "penalty" : "benefit"}>{b}</span>)}</span>
+          <span className="hunter-trait">{c.trait}</span>
+        </button>)}</div>
+      </Screen>}
+      {!panel && phase === "shop" && <Screen title="Power-Ups" eyebrow="PERMANENT BLESSINGS" footer={<><button className="btn-ghost" onClick={backToMenu}>Back</button><button className="btn-ghost" disabled={Boolean(profile.rewardLedger && !profile.rewardLedger.settled)} onClick={() => setPanel("refund")}>Refund power-ups</button><button className="btn-gold" onClick={() => changePhase("characters")}>Choose hunter →</button></>}>
+        <p className="section-intro"><strong>{gold(profile.gold)} gold</strong> in your treasury. Purchases apply to your next hunt.{profile.rewardLedger && !profile.rewardLedger.settled && <><br/><small>End your saved hunt from the main menu to refund power-ups.</small></>}</p>
+        <div className="shop-grid">{META_UPGRADES.map(u => { const rank = profile.upgrades[u.id] ?? 0, cost = metaUpgradeCost(u, rank), maxed = rank >= u.maxLevel; return <article className="panel upgrade-card" key={u.id}>
+          <div className="card-overline">RANK {rank} / {u.maxLevel}</div><h3>{u.name}</h3><p>{u.desc}</p><small>{upgradeBenefit(u.id, rank)}{!maxed && ` → ${upgradeBenefit(u.id, rank + 1)}`}</small><Rank value={rank} max={u.maxLevel}/>
+          <button className={maxed || cost > profile.gold ? "btn-ghost" : "btn-gold"} disabled={maxed || cost > profile.gold} onClick={() => buy(u.id)}>{maxed ? "Fully blessed" : `${gold(cost)} gold · Rank ${rank + 1}`}</button>
+          {!maxed && cost > profile.gold && <small>{gold(Math.ceil(cost - profile.gold))} more gold needed</small>}
+        </article>; })}</div>
+      </Screen>}
+      {!panel && phase === "paused" && <Screen title="The hunt can wait" eyebrow="PAUSED" narrow footer={<button className="btn-gold" onClick={() => gameRef.current?.resume()}>Resume hunt →</button>}>
+        <p>{hud ? `${fmtTime(hud.time)} survived · Level ${hud.level} · ${gold(hud.gold)} gold earned` : "Your hunt is paused."}</p>
+        <div className="menu-actions"><button className="btn-ghost" onClick={() => setPanel("build")}>Your build & stats</button><button className="btn-ghost" onClick={() => setPanel("settings")}>Settings</button><button className="btn-ghost" onClick={() => setPanel("journal")}>Hunter’s journal</button><button className="btn-danger" onClick={() => setPanel("end-run")}>End this hunt</button></div>
+      </Screen>}
+      {!panel && (phase === "levelup" || phase === "evolution") && <Screen title={phase === "evolution" ? "Choose an evolution" : "Choose your boon"} eyebrow={phase === "evolution" ? "POWER AWAKENS" : `LEVEL ${hud?.level ?? 1}`}>
+        <p className="section-intro">{phase === "evolution" ? "Your chest can awaken one of these weapons." : "The night is paused. Shape what happens next."}</p>
+        <p className="section-intro"><small>Weapons {hud?.weapons.length ?? 0} / 6 · Passives {hud?.passives.length ?? 0} / 6</small></p>
+        <div className="choice-grid">{options.map((o, i) => <div className="choice-wrap" key={`${o.id}-${i}`}><button className="choice-card" onClick={() => pick(o)}>
+          <span className="card-overline">{o.kind === "evolution" ? "Evolution · max weapon" : <>{o.isNew ? "NEW " : ""}{o.kind} {o.maxLevel > 0 ? `· ${o.isNew ? "Level 1" : `${o.level - 1} → ${o.level}`}` : ""}</>}</span>
+          <span className="choice-icon" aria-hidden="true">{o.icon}</span><h3>{o.name}</h3><p>{o.desc}</p>{o.detail && <p className="choice-detail">{o.detail}</p>}
+          {o.maxLevel > 0 && <Rank value={o.level} max={o.maxLevel}/>} {o.partner && <small>Evolution partner: {o.partner}</small>}{o.evolutionReady && <span className="benefit">Evolution ready</span>}
+        </button>{phase === "levelup" && (hud?.draftTools.banishes ?? 0) > 0 && <button className="btn-text" onClick={() => gameRef.current?.banishOption(o.id)}>Banish {o.name}</button>}</div>)}</div>
+        {phase === "levelup" && <div className="action-row"><button className="btn-ghost" disabled={!hud?.draftTools.rerolls} onClick={() => gameRef.current?.rerollDraft()}>Reroll ({hud?.draftTools.rerolls ?? 0})</button><button className="btn-ghost" disabled={!hud?.draftTools.skips} onClick={() => gameRef.current?.skipDraft()}>Skip ({hud?.draftTools.skips ?? 0})</button><span className="muted">Banish removes an item from future drafts this hunt.</span></div>}
+      </Screen>}
+      {!panel && phase === "chest" && <Screen title={rewards.some(r => r.isEvolution) ? "Power awakened" : "Treasures of the night"} eyebrow="CHEST OPENED" narrow footer={<button className="btn-gold" onClick={() => gameRef.current?.ackChest()}>Continue hunt →</button>}>
+        <div className="reward-list">{rewards.map((r, i) => <article className={`panel ${r.isEvolution ? "evolution-reward" : ""}`} key={i}><span aria-hidden="true">{r.icon}</span><div><h3>{r.name}</h3><p>{r.desc}</p></div></article>)}</div>
+      </Screen>}
+      {!panel && phase === "covenant" && <Screen title="A covenant in the dark" eyebrow="OPTIONAL RITUAL">
+        <p className="section-intro">{hud?.covenant?.status === "reward" ? "The ritual is complete. Choose your blessing for this hunt." : "Defeat 12 foes within the marked shrine area in 45 seconds. A cultist ring will arrive. Only enemies defeated inside the circle count. Complete it to choose a blessing. Failure grants no blessing; you may decline safely."}</p>
+        <div className="choice-grid">{covenants.map(c => <button className="choice-card" key={c.id} onClick={() => gameRef.current?.chooseCovenantReward(c.id)}><h3>{c.name}</h3><p>{c.desc}</p></button>)}</div>
+        {!covenants.length && <div className="action-row"><button className="btn-gold" onClick={() => gameRef.current?.acceptCovenant()}>Accept ritual</button><button className="btn-ghost" onClick={() => gameRef.current?.declineCovenant()}>Continue without it</button></div>}
+      </Screen>}
+      {!panel && result && (phase === "gameover" || phase === "victory") && <Screen title={result.won ? "Dawn reclaimed" : result.abandoned ? "The hunt ends here" : "The night remembers"} eyebrow={result.won ? "VICTORY" : result.abandoned ? "HUNT ENDED" : "FALLEN, NOT FORGOTTEN"}>
+        <p className="section-intro">{result.won ? "Death has fallen. You have earned the dawn." : result.abandoned ? "Your earned gold is kept. Return when you are ready." : result.cause || "The horde overcame you. Your earned gold carries into the next hunt."}</p>
+        {result.won && result.metrics.goldBySource.victory > 0 && <p className="section-intro"><small>Gold earned includes the fixed {gold(result.metrics.goldBySource.victory)}-gold dawn bonus.</small></p>}
+        <div className="result-stats"><Stat label="Survived" value={fmtTime(result.time)}/><Stat label="Gold earned" value={gold(result.gold)}/><Stat label="Enemies slain" value={gold(result.kills)}/><Stat label="Level reached" value={String(result.level)}/>{result.finaleTime > 0 && <Stat label="Death encounter" value={fmtTime(result.finaleTime)}/>}<Stat label="Damage dealt" value={gold(result.damageDealt)}/></div>
+        <div className="panel recap"><h3>Your final build</h3><p>{result.build.map(id => WEAPONS[id]?.name ?? id).join(" · ") || "Starting equipment"}</p><p className="muted">{result.won ? "Try a new hunter or a different evolution path." : "Invest your gold, keep escape routes open, and pair weapons with their evolution passives."}</p></div>
+        <div className="action-row"><button className="btn-gold" onClick={() => start(result.character)}>Hunt again →</button><button className="btn-ghost" onClick={() => changePhase("shop")}>Power-Ups</button><button className="btn-ghost" onClick={() => changePhase("characters")}>Change hunter</button><button className="btn-text" onClick={backToMenu}>Menu</button></div>
+      </Screen>}
+      {panel === "settings" && <Settings settings={settings} muted={profile.muted} onChange={changeSettings} onMute={() => { const p = profileRef.current; if (p) persist(setProfileMuted(p, !p.muted)); }} onBack={() => setPanel(null)}/>}
+      {panel === "journal" && <Journal profile={profile} onBack={() => setPanel(null)} onReplayTutorial={() => { changeSettings({ onboardingComplete: false }); setNotice("Guidance will appear in your next hunt."); }}/>}
+      {panel === "build" && hud && <BuildView hud={hud} onBack={() => setPanel(null)}/>}
+      {panel === "end-run" && <Screen title="End this hunt?" eyebrow="YOUR PROGRESS IS KEPT" narrow footer={<><button className="btn-ghost" onClick={() => setPanel(null)}>Keep hunting</button><button className="btn-danger" onClick={() => { setPanel(null); gameRef.current?.abandonRun(); }}>End hunt & keep gold</button></>}><p>This attempt will end. Gold already earned remains in your treasury. Your current weapons and level reset for the next hunt.</p></Screen>}
+      {panel === "reload-save" && <Screen title="Reload saved progress?" eyebrow="ANOTHER SESSION HAS CHANGED YOUR SAVE" narrow footer={<><button className="btn-ghost" onClick={() => setPanel(null)}>Keep this session open</button><button className="btn-danger" onClick={() => { gameRef.current?.stop(); audio.stopMusic(); profileRef.current = null; setProfile(null); setSaveError(""); setSaveConflict(false); setPanel(null); changePhase("menu"); setStartupAttempt(a => a + 1); }}>Reload latest saved progress</button></>}><p>Your current unsaved hunt and local changes will be discarded. The latest saved progress from the other session will be loaded.</p></Screen>}
+      {panel === "end-saved" && <Screen title="End your saved hunt?" narrow footer={<><button className="btn-ghost" onClick={() => setPanel(null)}>Keep checkpoint</button><button className="btn-danger" onClick={() => { const p = profileRef.current; if (p?.rewardLedger && !p.rewardLedger.settled) persist(settleRun(p, p.rewardLedger.runId, p.rewardLedger.latestStats, { outcome: "abandoned", cause: "Saved hunt ended deliberately" })); setPanel(null); }}>End saved hunt</button></>}><p>Your banked gold and permanent progress stay. The resumable hunt is removed, and you can refund or rebuild your power-ups.</p></Screen>}
+      {panel === "run-error" && <Screen title="The hunt stopped safely" eyebrow="RECOVERY" narrow footer={<button className="btn-gold" onClick={() => { setPanel(null); gameRef.current?.abandonRun(); }}>End hunt & keep earned gold</button>}><p>{runError}</p><p>Your permanent progress is retained. End this attempt before starting another hunt.</p></Screen>}
+      {panel === "refund" && <Screen title="Rebuild your blessings?" narrow footer={<><button className="btn-ghost" onClick={() => setPanel(null)}>Keep power-ups</button><button className="btn-gold" onClick={() => { const refund = refundUpgrades(profile); persist(refund.profile); setPanel(null); setNotice(`${gold(refund.refunded)} gold refunded.`); }}>Refund all power-ups</button></>}><p>All permanent ranks return to zero and their recorded purchase cost returns to your treasury. This affects future hunts.</p></Screen>}
+      {showOnboarding && <aside className="onboarding" data-ui><strong>{inputDevice === "pointer" ? "Drag to move. Release to stop." : "WASD or arrow keys to move. You can also drag."}</strong><span>{hud && hud.time > 10 ? "Collect glowing gems to level up. Pair weapons with passives to unlock evolutions." : "Your weapons attack automatically. Keep an escape route open; Sword Wave follows your last movement direction."}</span><button className="btn-text" onClick={() => changeSettings({ onboardingComplete: true })}>Got it</button></aside>}
+      {saveError && <aside className="save-error" data-ui data-global role="alert"><strong>Progress is waiting to save.</strong><span>{saveError}</span><button className="btn-ghost" onClick={() => { if (saveConflict) { gameRef.current?.pause(); setPanel("reload-save"); } else if (profileRef.current) persist(profileRef.current); }}>{saveConflict ? "Reload saved progress…" : "Retry save"}</button></aside>}
+      {notice && <div className="toast" data-ui role="status">{notice}</div>}
+      {!qaMode && !inRun && <div className="save-status" aria-live="off">{saveError ? "Save pending" : qaMode ? "QA · temporary profile, never saved" : platform.storageKind === "preview" ? "SDK preview · progress lasts for this session" : saving ? "Saving…" : "Progress saved"}</div>}
+    </>}
+    {process.env.NODE_ENV !== "production" && qaMode && profile && <QaLab onLaunch={(scenario) => { start(scenario.hunter); gameRef.current?.debugScenario(scenario); setHud(gameRef.current?.hudSnapshot() ?? null); }} onPause={() => gameRef.current?.pause()} onResume={() => gameRef.current?.resume()}/>}
+    {suspended && <div className="platform-curtain" data-ui role="status">Hunt suspended</div>}
+  </main>;
 }
 
-// =====================================================================
-// menu backdrop (canvas) — drifting embers over a dark gradient
-// =====================================================================
+function Screen({ title, eyebrow, children, footer, narrow = false, hero = false }: { title: string; eyebrow?: string; children: ReactNode; footer?: ReactNode; narrow?: boolean; hero?: boolean }) {
+  const ref = useRef<HTMLElement>(null);
+  const opened = useRef(0);
+  useEffect(() => {
+    opened.current = performance.now();
+    const previous = document.activeElement as HTMLElement | null;
+    const id = requestAnimationFrame(() => ref.current?.querySelector<HTMLElement>("h1,h2")?.focus());
+    return () => { cancelAnimationFrame(id); if (previous?.isConnected) previous.focus({ preventScroll: true }); };
+  }, [title]);
+  return <section ref={ref} data-ui className={`screen-shell ${hero ? "hero-screen" : ""}`} aria-label={title} role="dialog" aria-modal="true" onClickCapture={e => { if (performance.now() - opened.current < 180) { e.preventDefault(); e.stopPropagation(); } }} onKeyDown={e => {
+    if (e.key !== "Tab") return;
+    const controls = [...Array.from(ref.current?.querySelectorAll<HTMLElement>('button:not([disabled]),a[href],input,select,[tabindex="0"]') ?? []), ...Array.from(ref.current?.closest('main')?.querySelectorAll<HTMLElement>('[data-global] button') ?? [])];
+    if (!controls.length) { e.preventDefault(); return; }
+    const first = controls[0], last = controls[controls.length - 1];
+    if (e.shiftKey && (document.activeElement === first || document.activeElement?.tagName.match(/^H[12]$/))) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+  }}><div className={`screen-content ${narrow ? "narrow" : ""}`}>
+    <header className="screen-heading">{eyebrow && <p className="eyebrow">{eyebrow}</p>}<h1 tabIndex={-1}>{title}</h1><span className="heading-rule" aria-hidden="true"/></header>
+    {children}{footer && <footer className="screen-footer">{footer}</footer>}
+  </div></section>;
+}
+function Rank({ value, max }: { value: number; max: number }) { return <span className="rank-track" aria-label={`Rank ${value} of ${max}`}>{Array.from({ length: max }, (_, i) => <span key={i} className={i < value ? "filled" : ""}/>)}</span>; }
+function Stat({ label, value }: { label: string; value: string }) { return <div className="stat"><span>{label}</span><strong>{value}</strong></div>; }
 
+function Hud({ hud, onPause }: { hud: HudState; onPause: () => void }) {
+  const hp = Math.max(0, Math.min(1, hud.hp / hud.maxHp));
+  return <div className="hud" aria-label="Hunt status">
+    <div className="xp-track" role="progressbar" aria-label={`Experience, level ${hud.level}`} aria-valuenow={Math.floor(hud.xp)} aria-valuemin={0} aria-valuemax={Math.ceil(hud.xpNext)}><span style={{ width: `${Math.min(1, hud.xp / hud.xpNext) * 100}%` }}/></div>
+    <div className="hud-main"><div className="hud-health"><span className="hud-label">VITALITY <b>{Math.ceil(hud.hp)} / {hud.maxHp}</b></span><div className={`health-track ${hp < .35 ? "low" : ""}`}><span style={{ width: `${hp * 100}%` }}/></div><span className="hud-small">LV {hud.level} <span> · {gold(hud.kills)} slain</span></span></div>
+      <div className="hud-time"><strong>{fmtTime(hud.time)}</strong><span>{hud.finaleTime > 0 ? `DEATH +${fmtTime(hud.finaleTime)}` : hud.time < 300 ? "HARBINGER AT 05:00" : hud.time < 900 ? "HARBINGER AT 15:00" : "DEATH AT 30:00"}</span></div>
+      <div className="hud-actions"><span>{gold(hud.gold)} <small>gold</small></span><button className="btn-ghost" data-ui onClick={onPause} aria-label="Pause hunt">Ⅱ <span>Pause</span></button></div>
+    </div>
+    <div className="hud-equipment" aria-label="Your equipment">{hud.weapons.map(w => <span key={w.id} title={`${w.name}, ${w.evolved ? "evolved" : `level ${w.level}`}`} className={w.evolved ? "evolved" : ""}><span aria-hidden="true">{w.icon}</span><b>{w.evolved ? "✦" : w.level}</b><span className="sr-only">{w.name}, level {w.level}</span></span>)}<i/>{hud.passives.map(p => <span key={p.id} title={`${p.name}, level ${p.level}`}><span aria-hidden="true">{p.icon}</span><b>{p.level}</b><span className="sr-only">{p.name}, level {p.level}</span></span>)}</div>
+    {hud.covenant?.status === "active" && <div className="covenant-status"><strong>Ritual: {hud.covenant.progress} / {hud.covenant.target}</strong><span>{Math.ceil(hud.covenant.remaining)}s remaining · stay near the shrine</span></div>}
+    {hud.boss && <div className="boss-health"><strong>{hud.boss.name}</strong><div role="progressbar" aria-label={`${hud.boss.name} health`} aria-valuenow={Math.ceil(hud.boss.hp)} aria-valuemin={0} aria-valuemax={Math.ceil(hud.boss.maxHp)}><span style={{ width: `${Math.max(0, hud.boss.hp / hud.boss.maxHp) * 100}%` }}/></div></div>}
+  </div>;
+}
+
+function Settings({ settings, muted, onChange, onMute, onBack }: { settings: GameSettings; muted: boolean; onChange: (patch: Partial<GameSettings>) => void; onMute: () => void; onBack: () => void }) {
+  return <Screen title="Make the night yours" eyebrow="SETTINGS" footer={<button className="btn-gold" onClick={onBack}>Done</button>}>
+    <div className="settings-grid"><section className="panel settings-section"><h2>Sound</h2>
+      {platform.isPlayables && <p>YouTube controls overall sound. These levels apply when platform sound is enabled.</p>}
+      <label className="setting-row"><span>Music <span aria-hidden="true">{Math.round(settings.musicVolume * 100)}%</span></span><input type="range" aria-label="Music volume" aria-valuetext={`${Math.round(settings.musicVolume * 100)} percent`} min="0" max="1" step=".05" value={settings.musicVolume} onChange={e => onChange({ musicVolume: Number(e.target.value) })}/></label>
+      <label className="setting-row"><span>Sound effects <span aria-hidden="true">{Math.round(settings.sfxVolume * 100)}%</span></span><input type="range" aria-label="Sound effects volume" aria-valuetext={`${Math.round(settings.sfxVolume * 100)} percent`} min="0" max="1" step=".05" value={settings.sfxVolume} onChange={e => onChange({ sfxVolume: Number(e.target.value) })}/></label>
+      {!platform.isPlayables && <button className="btn-ghost" onClick={onMute} aria-pressed={muted}>{muted ? "Enable sound" : "Mute all sound"}</button>}
+    </section><section className="panel settings-section"><h2>Comfort & clarity</h2>
+      <Toggle label="Reduced motion" description="Calmer menus, no camera shake or damage flashing." checked={settings.reducedMotion} onChange={v => onChange({ reducedMotion: v })}/>
+      <Toggle label="Screen shake" checked={settings.screenShake} onChange={v => onChange({ screenShake: v })}/>
+      <Toggle label="Impact flashes & pulses" description="Keep health and danger warnings visible without flashing impacts." checked={settings.screenFlash} onChange={v => onChange({ screenFlash: v })}/>
+      <Toggle label="Emphasize threats & hunter" checked={settings.highContrast} onChange={v => onChange({ highContrast: v })}/>
+      <label className="setting-row"><span>Visual effects</span><select aria-label="Visual effects" value={settings.effectsIntensity} onChange={e => onChange({ effectsIntensity: e.target.value as GameSettings["effectsIntensity"] })}><option value="full">Full atmosphere</option><option value="reduced">Fewer particles</option></select></label>
+      <label className="setting-row"><span>Damage numbers</span><select aria-label="Damage numbers" value={settings.damageNumbers} onChange={e => onChange({ damageNumbers: e.target.value as GameSettings["damageNumbers"] })}><option value="all">All hits</option><option value="critical">Critical hits & healing</option><option value="off">Off</option></select></label>
+    </section><section className="panel settings-section"><h2>Movement</h2><p>WASD / arrow keys, or drag with a mouse, pen or finger. Attacks fire automatically.</p>
+      <label className="setting-row"><span>Touch joystick</span><select aria-label="Touch joystick" value={settings.joystickMode} onChange={e => onChange({ joystickMode: e.target.value as GameSettings["joystickMode"] })}><option value="floating">Where you touch</option><option value="fixed">Fixed position</option></select></label>
+      <label className="setting-row"><span>Fixed joystick side</span><select aria-label="Fixed joystick side" value={settings.joystickSide} onChange={e => onChange({ joystickSide: e.target.value as GameSettings["joystickSide"] })}><option value="left">Left</option><option value="right">Right</option></select></label>
+      <p className="muted">{platform.isPlayables ? "Press P or use the Pause button to pause." : "Press P or Escape to pause."} Release movement before choosing upgrades.</p>
+    </section></div>
+  </Screen>;
+}
+function Toggle({ label, description, checked, onChange }: { label: string; description?: string; checked: boolean; onChange: (v: boolean) => void }) {
+  return <label className="toggle-row"><span><strong>{label}</strong>{description && <small>{description}</small>}</span><input type="checkbox" aria-label={label} checked={checked} onChange={e => onChange(e.target.checked)}/></label>;
+}
+function Journal({ profile, onBack, onReplayTutorial }: { profile: ProfileSave; onBack: () => void; onReplayTutorial: () => void }) {
+  const [tab, setTab] = useState("field");
+  return <Screen title="Hunter’s journal" eyebrow="KNOWLEDGE OUTLASTS THE NIGHT" footer={<button className="btn-gold" onClick={onBack}>Back</button>}>
+    <nav className="journal-tabs" aria-label="Journal pages">{[["field", "Field guide"], ["recipes", "Evolutions"], ["records", "Records"]].map(([id, name]) => <button key={id} className={tab === id ? "btn-gold" : "btn-ghost"} aria-pressed={tab === id} onClick={() => setTab(id)}>{name}</button>)}</nav>
+    {tab === "field" && <div className="guide-grid"><article className="panel"><h2>Move to survive</h2><p>Use WASD, arrow keys, or drag. Your attacks fire automatically. Sword Wave follows the last direction you moved; other weapons seek targets or attack around you.</p><p>Keep open ground behind you. Circling through a gap is safer than running into an unbroken wall of enemies.</p><button className="btn-ghost" onClick={onReplayTutorial}>Show first-run guidance again</button></article>
+      <article className="panel"><h2>Build with purpose</h2><p>Glowing gems grant experience. Each level offers a choice. Carry up to six weapons and six passives. Max a weapon, hold its paired passive, then claim a treasure chest to evolve it.</p><p>Reroll, skip and banish charges are limited per hunt. An item you banish will not appear again in that hunt’s drafts.</p></article>
+      <article className="panel"><h2>Read the ground</h2><p>Outlined danger zones warn of incoming attacks. Leave before the countdown closes. Hostile projectiles can hurt you even while you are damaging their source.</p><p>The first two harbingers arrive at 05:00 and 15:00. Death arrives at 30:00. Defeat Death to win; reaching the timer alone is not victory.</p></article>
+      <article className="panel"><h2>Know your rewards</h2><p>Gems give XP. Coins give permanent gold. Food restores health. Magnets gather nearby gems. Bombs damage the horde. Chests grant rewards and eligible evolutions.</p><p>Earned gold is kept when the hunt ends. Spend it on Power-Ups, or refund permanent upgrades to try another direction.</p></article>
+    </div>}
+    {tab === "recipes" && <div className="recipe-grid">{Object.values(WEAPONS).map(w => <article className="panel recipe" key={w.id}><p className="card-overline">{w.name} · LEVEL {w.maxLevel}</p><h2>{w.evolvedName}</h2><p className="recipe-formula"><span>{w.name}</span><b>+</b><span>{PASSIVES[w.evolvesWith].name}</span><b>+</b><span>Treasure chest</span></p><p>{w.evolvedDesc}</p></article>)}</div>}
+    {tab === "records" && <><div className="result-stats"><Stat label="Best survival" value={fmtTime(profile.bestTime)}/><Stat label="Dawns reclaimed" value={String(profile.wins)}/><Stat label="Hunts completed" value={String(profile.runs)}/><Stat label="Enemies slain" value={gold(profile.totalKills)}/></div>
+      <h2 className="subheading">Hunter mastery</h2><div className="guide-grid">{CHARACTERS.map(c => <article className="panel" key={c.id}><h2>{c.name}</h2><p>{profile.mastery[c.id].runs} hunts · {profile.mastery[c.id].wins} victories · best {fmtTime(profile.mastery[c.id].bestTime)}</p><p className="muted">{c.trait}</p></article>)}</div>
+      <h2 className="subheading">Milestones · {profile.achievements.length} / {ACHIEVEMENTS.length}</h2><div className="guide-grid">{ACHIEVEMENTS.map(a => <article className="panel" key={a.id}><p className="card-overline">{profile.achievements.includes(a.id) ? "EARNED" : "UNDISCOVERED"}</p><h3>{a.name}</h3><p>{a.description}</p></article>)}</div>
+      <h2 className="subheading">Recent hunts</h2>{profile.history.length ? <div className="history-list">{profile.history.map(r => <article className="panel" key={r.runId}><h3>{CHARACTERS.find(c => c.id === r.hunter)?.name} · {r.outcome === "won" ? "Dawn reclaimed" : r.outcome === "abandoned" ? "Hunt ended" : "Fallen"}</h3><p>{fmtTime(r.time)} · {r.kills} slain · {gold(r.gold)} gold · Level {r.level}</p><p className="muted">{r.cause}</p><small>{(r.build.length ? r.build : r.weapons.map(id => WEAPONS[id]?.name ?? id)).join(" · ")}</small></article>)}</div> : <p className="muted">Your first hunt will begin this record.</p>}</>}
+  </Screen>;
+}
+function BuildView({ hud, onBack }: { hud: HudState; onBack: () => void }) {
+  return <Screen title="Your build" eyebrow="THE POWER YOU CARRY" footer={<button className="btn-gold" onClick={onBack}>Back to pause</button>}>
+    <p className="section-intro">{hud.trait}</p><h2 className="subheading">Weapons · {hud.weapons.length} / 6</h2><div className="build-grid">{hud.weapons.map(w => <article className="panel" key={w.id}><p className="card-overline">{w.evolved ? "EVOLVED" : `LEVEL ${w.level} / ${w.maxLevel}`}</p><h3>{w.name}</h3><p>{w.desc}</p><Rank value={w.level} max={w.maxLevel}/><small>{w.evolved ? "Evolution complete" : w.evolutionReady ? "Ready to evolve at your next chest" : `Evolution partner: ${w.partner}`}</small></article>)}</div>
+    <h2 className="subheading">Passives · {hud.passives.length} / 6</h2><div className="build-grid">{hud.passives.map(p => <article className="panel" key={p.id}><h3>{p.name}</h3><p>{p.desc}</p><Rank value={p.level} max={p.maxLevel}/></article>)}</div>
+    <h2 className="subheading">Effective stats</h2><div className="result-stats"><Stat label="Damage" value={`${Math.round(hud.stats.might * 100)}%`}/><Stat label="Attack area" value={`${Math.round(hud.stats.area * 100)}%`}/><Stat label="Cooldown" value={`${Math.round(hud.stats.cooldown * 100)}%`}/><Stat label="Movement" value={`${Math.round(hud.stats.moveSpeed * 100)}%`}/><Stat label="Critical chance" value={`${Math.round(hud.stats.critChance * 100)}%`}/><Stat label="Armor" value={String(hud.stats.armor)}/><Stat label="Regeneration" value={`${hud.stats.regen.toFixed(1)} HP/s`}/><Stat label="Revives left" value={String(hud.stats.revives)}/></div>
+  </Screen>;
+}
 const embers: { x: number; y: number; s: number; v: number; p: number }[] = [];
 function drawMenuBackdrop(ctx: CanvasRenderingContext2D, w: number, h: number, t: number) {
   const grad = ctx.createLinearGradient(0, 0, 0, h);
@@ -322,385 +463,37 @@ function drawMenuBackdrop(ctx: CanvasRenderingContext2D, w: number, h: number, t
   ctx.fill();
 }
 
-// =====================================================================
-// HUD
-// =====================================================================
 
-function Hud({ hud, onPause }: { hud: HudState; onPause: () => void }) {
-  const xpFrac = Math.min(1, hud.xp / hud.xpNext);
-  const hpFrac = Math.max(0, hud.hp / hud.maxHp);
-  return (
-    <div className="pointer-events-none absolute inset-0 z-20">
-      {/* XP bar */}
-      <div className="absolute inset-x-0 top-0 h-[14px] bg-black/70 border-b border-white/10">
-        <div
-          className="h-full bg-gradient-to-r from-sky-500 via-indigo-400 to-fuchsia-400 transition-[width] duration-200"
-          style={{ width: `${xpFrac * 100}%`, boxShadow: "0 0 12px rgba(99,102,241,0.8)" }}
-        />
-        <div className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] font-bold tracking-wider text-white/90">
-          LV {hud.level}
-        </div>
-      </div>
-
-      {/* timer */}
-      <div className="absolute left-1/2 top-6 -translate-x-1/2 text-center">
-        <div className="font-display text-3xl sm:text-4xl font-bold tracking-[0.15em] text-white/95" style={{ textShadow: "0 0 14px rgba(140,120,255,0.6), 0 2px 0 #000" }}>
-          {fmtTime(hud.time)}
-        </div>
-      </div>
-
-      {/* kills + gold */}
-      <div className="absolute right-2 top-6 flex flex-col items-end gap-1 text-sm font-semibold">
-        <div className="rounded bg-black/55 px-2 py-0.5 text-red-300">💀 {hud.kills}</div>
-        <div className="rounded bg-black/55 px-2 py-0.5 text-amber-300">🪙 {hud.gold}</div>
-        <button
-          data-ui
-          onClick={onPause}
-          className="btn-ghost pointer-events-auto mt-1 rounded-md px-3 py-1 text-xs"
-        >
-          ⏸ PAUSE
-        </button>
-      </div>
-
-      {/* HP + items */}
-      <div className="absolute left-2 top-6 flex flex-col gap-1.5">
-        <div className="h-[14px] w-40 sm:w-52 overflow-hidden rounded border border-black/60 bg-black/60">
-          <div
-            className={`h-full transition-[width] duration-200 ${hpFrac > 0.35 ? "bg-gradient-to-r from-emerald-600 to-emerald-400" : "bg-gradient-to-r from-red-700 to-red-500 anim-pulse-glow"}`}
-            style={{ width: `${hpFrac * 100}%` }}
-          />
-          <div className="absolute mt-[-14px] h-[14px] w-40 sm:w-52 text-center text-[10px] font-bold leading-[14px] text-white/95">
-            {hud.hp} / {hud.maxHp}
-          </div>
-        </div>
-        <div className="flex max-w-[180px] flex-wrap gap-1">
-          {hud.weapons.map((w, i) => (
-            <div key={i} className={`relative flex h-7 w-7 items-center justify-center rounded border text-sm ${w.evolved ? "border-pink-400/70 bg-pink-950/60" : "border-white/20 bg-black/55"}`}>
-              {w.icon}
-              <span className="absolute -bottom-1 -right-1 rounded bg-black/85 px-0.5 text-[8px] font-bold leading-tight text-amber-300">{w.evolved ? "★" : w.level}</span>
-            </div>
-          ))}
-        </div>
-        <div className="flex max-w-[180px] flex-wrap gap-1">
-          {hud.passives.map((p, i) => (
-            <div key={i} className="relative flex h-6 w-6 items-center justify-center rounded border border-indigo-300/25 bg-black/45 text-xs">
-              {p.icon}
-              <span className="absolute -bottom-1 -right-1 rounded bg-black/85 px-0.5 text-[8px] font-bold leading-tight text-indigo-300">{p.level}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* boss bar */}
-      {hud.boss && (
-        <div className="absolute inset-x-0 bottom-4 mx-auto w-[min(620px,92%)]">
-          <div className="mb-1 text-center font-display text-xs sm:text-sm font-bold tracking-[0.25em] text-red-300 uppercase" style={{ textShadow: "0 0 10px rgba(255,40,40,0.7)" }}>
-            {hud.boss.name}
-          </div>
-          <div className="h-[16px] overflow-hidden rounded border border-red-900 bg-black/75">
-            <div
-              className="h-full bg-gradient-to-r from-red-800 via-red-500 to-red-600 transition-[width] duration-150"
-              style={{ width: `${(hud.boss.hp / hud.boss.maxHp) * 100}%`, boxShadow: "0 0 14px rgba(255,30,30,0.7)" }}
-            />
-          </div>
-        </div>
-      )}
-    </div>
-  );
+function upgradeBenefit(id: string, rank: number) {
+  const stats = { ...BASE_STATS };
+  META_UPGRADES.find(u => u.id === id)?.apply(stats, rank);
+  const values: Record<string, string> = {
+    might: `${Math.round((stats.might - 1) * 100)}% bonus damage`, vitality: `${stats.maxHp} base HP`,
+    swiftness: `${Math.round((stats.moveSpeed - 1) * 100)}% bonus speed`, haste: `${Math.round((1 - stats.cooldown) * 1000) / 10}% cooldown reduction`,
+    magnetism: `${Math.round(stats.magnet)} pickup range`, fortune: `${Math.round((stats.luck - 1) * 100)}% bonus luck`,
+    greed: `${Math.round((stats.goldGain - 1) * 100)}% bonus gold`, growth: `${Math.round((stats.xpGain - 1) * 100)}% bonus XP`,
+    armor: `${stats.armor} armor`, revival: `${stats.revives} ${stats.revives === 1 ? "revive" : "revives"}`,
+  };
+  return values[id] ?? `Rank ${rank}`;
 }
 
-// =====================================================================
-// Screens
-// =====================================================================
-
-function Screen({ children }: { children: React.ReactNode }) {
-  return (
-    <div data-ui className="absolute inset-0 z-30 flex items-center justify-center overflow-y-auto nice-scroll p-4">
-      {children}
-    </div>
-  );
-}
-
-function MainMenu({ save, onPlay, onShop, onHowTo, onMute }: {
-  save: MetaSave;
-  onPlay: () => void;
-  onShop: () => void;
-  onHowTo: () => void;
-  onMute: () => void;
-}) {
-  return (
-    <Screen>
-      <div className="anim-fade-in-up flex w-full max-w-xl flex-col items-center text-center">
-        <div className="font-display text-base tracking-[0.5em] text-purple-300/70">N I G H T F A L L</div>
-        <h1 className="font-display title-glow mt-1 text-6xl sm:text-7xl font-black tracking-wider text-red-500">NORPEK</h1>
-        <div className="font-display mt-2 text-lg tracking-[0.35em] text-amber-200/90">SURVIVORS</div>
-        <p className="mt-4 max-w-md text-sm text-zinc-400">
-          The dark holds its breath for thirty minutes. Survive the horde, fell the three harbingers, and strike down Death itself to reclaim the dawn.
-        </p>
-
-        <div className="mt-8 flex w-64 flex-col gap-3">
-          <button className="btn-gold rounded-lg py-3 text-lg font-bold" onClick={onPlay}>⚔ BEGIN THE HUNT</button>
-          <button className="btn-ghost rounded-lg py-2.5" onClick={onShop}>🜲 POWER-UPS</button>
-          <button className="btn-ghost rounded-lg py-2.5" onClick={onHowTo}>📜 HOW TO PLAY</button>
-          <button className="btn-ghost rounded-lg py-2" onClick={onMute}>{save.muted ? "🔇 UNMUTE" : "🔊 MUTE"}</button>
-        </div>
-
-        <div className="mt-8 flex flex-wrap justify-center gap-x-6 gap-y-1 text-xs text-zinc-500">
-          <span>🪙 <span className="text-amber-300 font-semibold">{save.gold}</span> gold</span>
-          <span>⏱ best {fmtTime(save.bestTime)}</span>
-          <span>💀 {save.totalKills.toLocaleString()} slain</span>
-          <span>🏆 {save.wins} {save.wins === 1 ? "dawn" : "dawns"} reclaimed</span>
-        </div>
-      </div>
-    </Screen>
-  );
-}
-
-function CharacterSelect({ sel, onSel, onBack, onStart }: {
-  sel: CharacterId;
-  onSel: (c: CharacterId) => void;
-  onBack: () => void;
-  onStart: () => void;
-}) {
-  return (
-    <Screen>
-      <div className="anim-fade-in-up w-full max-w-3xl">
-        <h2 className="font-display text-center text-3xl font-bold tracking-[0.2em] text-amber-200">CHOOSE YOUR HUNTER</h2>
-        <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2">
-          {CHARACTERS.map((c) => (
-            <div
-              key={c.id}
-              className={`choice-card p-4 ${sel === c.id ? "selected" : ""}`}
-              onClick={() => onSel(c.id)}
-            >
-              <div className="flex items-center gap-3">
-                <div className="flex h-12 w-12 items-center justify-center rounded-lg border border-white/15 bg-black/40 text-3xl">{c.icon}</div>
-                <div>
-                  <div className="font-display text-lg font-bold" style={{ color: c.color }}>{c.name}</div>
-                  <div className="text-xs tracking-[0.2em] text-zinc-400 uppercase">{c.title}</div>
-                </div>
-              </div>
-              <p className="mt-2 text-sm text-zinc-400">{c.desc}</p>
-              <ul className="mt-2 space-y-0.5 text-xs text-emerald-300/90">
-                {c.bonuses.map((b) => (
-                  <li key={b}>◆ {b}</li>
-                ))}
-              </ul>
-            </div>
-          ))}
-        </div>
-        <div className="mt-6 flex justify-center gap-3">
-          <button className="btn-ghost rounded-lg px-6 py-2.5" onClick={onBack}>← BACK</button>
-          <button className="btn-gold rounded-lg px-10 py-2.5 text-lg font-bold" onClick={onStart}>HUNT ⚔</button>
-        </div>
-      </div>
-    </Screen>
-  );
-}
-
-function Shop({ save, onBuy, onBack }: { save: MetaSave; onBuy: (id: string) => void; onBack: () => void }) {
-  return (
-    <Screen>
-      <div className="anim-fade-in-up w-full max-w-3xl">
-        <h2 className="font-display text-center text-3xl font-bold tracking-[0.2em] text-amber-200">POWER-UPS</h2>
-        <p className="mt-1 text-center text-sm text-zinc-400">
-          Permanent blessings, paid in gold. <span className="text-amber-300 font-semibold">🪙 {save.gold}</span>
-        </p>
-        <div className="mt-5 grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-4">
-          {META_UPGRADES.map((u) => {
-            const lvl = save.upgrades[u.id] ?? 0;
-            const maxed = lvl >= u.maxLevel;
-            const cost = metaUpgradeCost(u, lvl);
-            const afford = save.gold >= cost;
-            return (
-              <div key={u.id} className="panel flex flex-col p-3">
-                <div className="flex items-center gap-2">
-                  <span className="text-2xl">{u.icon}</span>
-                  <span className="font-display text-sm font-bold text-zinc-100">{u.name}</span>
-                </div>
-                <div className="mt-1 text-[11px] text-zinc-400">{u.desc}</div>
-                <div className="mt-2 flex gap-1">
-                  {Array.from({ length: u.maxLevel }).map((_, i) => (
-                    <div key={i} className={`h-1.5 flex-1 rounded ${i < lvl ? "bg-amber-400" : "bg-white/10"}`} />
-                  ))}
-                </div>
-                <button
-                  className="btn-gold mt-2.5 rounded-md py-1.5 text-xs font-bold disabled:opacity-100"
-                  disabled={maxed || !afford}
-                  onClick={() => onBuy(u.id)}
-                >
-                  {maxed ? "MAXED" : `🪙 ${cost}`}
-                </button>
-              </div>
-            );
-          })}
-        </div>
-        <div className="mt-6 flex justify-center">
-          <button className="btn-ghost rounded-lg px-6 py-2.5" onClick={onBack}>← BACK</button>
-        </div>
-      </div>
-    </Screen>
-  );
-}
-
-function HowTo({ onBack }: { onBack: () => void }) {
-  return (
-    <Screen>
-      <div className="anim-fade-in-up panel w-full max-w-lg p-6">
-        <h2 className="font-display text-center text-2xl font-bold tracking-[0.2em] text-amber-200">HOW TO PLAY</h2>
-        <div className="mt-4 space-y-3 text-sm text-zinc-300">
-          <p>🕹 <b>Move</b> with <b>WASD</b> / arrow keys — or touch &amp; drag anywhere on mobile. Your weapons attack on their own.</p>
-          <p>💎 Collect <b>gems</b> from the fallen to level up, then choose new weapons and passives. You can carry 6 of each.</p>
-          <p>⭐ Max out a weapon and hold its paired passive, then open a <b>treasure chest</b> (dropped by crowned elites) to <b>evolve</b> it into something monstrous.</p>
-          <p>👑 Harbingers arrive at <b>5:00</b> and <b>15:00</b>. At <b>30:00</b>, <b>Death itself</b> comes for you — slay it to win the night.</p>
-          <p>🪙 Gold persists between runs. Spend it on permanent <b>Power-Ups</b>.</p>
-          <p>⏸ Press <b>ESC</b> or <b>P</b> to pause.</p>
-        </div>
-        <div className="mt-5 flex justify-center">
-          <button className="btn-ghost rounded-lg px-6 py-2.5" onClick={onBack}>← BACK</button>
-        </div>
-      </div>
-    </Screen>
-  );
-}
-
-function LevelUpModal({ options, onPick, level }: { options: UpgradeOption[]; onPick: (o: UpgradeOption) => void; level: number }) {
-  return (
-    <div data-ui className="absolute inset-0 z-40 flex items-center justify-center bg-black/65 p-4 anim-fade-in">
-      <div className="anim-fade-in-up w-full max-w-2xl">
-        <div className="text-center">
-          <div className="font-display gold-text text-3xl font-black tracking-[0.2em]">LEVEL UP!</div>
-          <div className="mt-1 text-xs tracking-[0.3em] text-zinc-400">LEVEL {level} — CHOOSE YOUR BOON</div>
-        </div>
-        <div className={`mt-5 grid gap-3 ${options.length >= 4 ? "sm:grid-cols-4" : "sm:grid-cols-3"} grid-cols-1`}>
-          {options.map((o, i) => (
-            <button
-              key={`${o.id}-${i}`}
-              className={`choice-card p-4 text-left ${o.isNew ? "is-new" : ""}`}
-              style={{ animationDelay: `${i * 70}ms` }}
-              onClick={() => onPick(o)}
-            >
-              <div className="flex items-center justify-between">
-                <span className="text-3xl">{o.icon}</span>
-                {o.isNew ? (
-                  <span className="rounded bg-emerald-500/20 px-1.5 py-0.5 text-[10px] font-bold tracking-wider text-emerald-300">NEW!</span>
-                ) : (
-                  <span className="rounded bg-white/10 px-1.5 py-0.5 text-[10px] font-bold text-zinc-300">LV {o.level}</span>
-                )}
-              </div>
-              <div className="font-display mt-2 text-base font-bold" style={{ color: o.color }}>{o.name}</div>
-              {o.maxLevel > 0 && (
-                <div className="mt-1.5 flex gap-0.5">
-                  {Array.from({ length: o.maxLevel }).map((_, j) => (
-                    <div key={j} className={`h-1 flex-1 rounded ${j < o.level ? "bg-amber-400" : "bg-white/10"}`} />
-                  ))}
-                </div>
-              )}
-              <div className="mt-2 text-xs leading-relaxed text-zinc-400">{o.desc}</div>
-            </button>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function ChestModal({ rewards, onClose }: { rewards: ChestReward[]; onClose: () => void }) {
-  const hasEvo = rewards.some((r) => r.isEvolution);
-  return (
-    <div data-ui className="absolute inset-0 z-40 flex items-center justify-center bg-black/70 p-4 anim-fade-in">
-      <div className="anim-fade-in-up panel w-full max-w-md p-6 text-center" style={hasEvo ? { borderColor: "rgba(244,114,182,0.6)", boxShadow: "0 0 50px rgba(244,114,182,0.25)" } : undefined}>
-        <div className="text-6xl" style={{ filter: "drop-shadow(0 0 18px rgba(240,199,94,0.8))" }}>{hasEvo ? "✨" : "🎁"}</div>
-        <div className={`font-display mt-2 text-2xl font-black tracking-[0.2em] ${hasEvo ? "text-pink-300" : "gold-text"}`}>
-          {hasEvo ? "EVOLUTION!" : "TREASURE!"}
-        </div>
-        <div className="mt-4 space-y-2 text-left">
-          {rewards.map((r, i) => (
-            <div key={i} className={`flex items-center gap-3 rounded-lg border p-2.5 ${r.isEvolution ? "border-pink-400/50 bg-pink-950/40" : "border-white/10 bg-white/5"}`} style={{ animation: `fadeInUp 0.3s ease both`, animationDelay: `${i * 120}ms` }}>
-              <span className="text-2xl">{r.icon}</span>
-              <div>
-                <div className={`text-sm font-bold ${r.isEvolution ? "text-pink-200" : "text-zinc-100"}`}>{r.name}</div>
-                <div className="text-[11px] text-zinc-400">{r.desc}</div>
-              </div>
-            </div>
-          ))}
-        </div>
-        <button className="btn-gold mt-5 w-full rounded-lg py-2.5 font-bold" onClick={onClose}>CONTINUE</button>
-      </div>
-    </div>
-  );
-}
-
-function PauseModal({ hud, muted, onResume, onQuit, onMute }: {
-  hud: HudState;
-  muted: boolean;
-  onResume: () => void;
-  onQuit: () => void;
-  onMute: () => void;
-}) {
-  return (
-    <div data-ui className="absolute inset-0 z-40 flex items-center justify-center bg-black/70 p-4 anim-fade-in">
-      <div className="anim-fade-in-up panel w-full max-w-sm p-6 text-center">
-        <div className="font-display text-3xl font-black tracking-[0.25em] text-zinc-100">PAUSED</div>
-        <div className="mt-2 text-xs text-zinc-400">{fmtTime(hud.time)} — LV {hud.level} — 💀 {hud.kills}</div>
-        <div className="mt-4 flex flex-wrap justify-center gap-1.5">
-          {hud.weapons.map((w, i) => (
-            <span key={i} className={`rounded border px-1.5 py-0.5 text-sm ${w.evolved ? "border-pink-400/60" : "border-white/15"}`}>{w.icon}{w.evolved ? "★" : w.level}</span>
-          ))}
-          {hud.passives.map((p, i) => (
-            <span key={i} className="rounded border border-indigo-300/25 px-1.5 py-0.5 text-sm">{p.icon}{p.level}</span>
-          ))}
-        </div>
-        <div className="mt-5 flex flex-col gap-2.5">
-          <button className="btn-gold rounded-lg py-2.5 font-bold" onClick={onResume}>RESUME</button>
-          <button className="btn-ghost rounded-lg py-2" onClick={onMute}>{muted ? "🔇 UNMUTE" : "🔊 MUTE"}</button>
-          <button className="btn-ghost rounded-lg py-2 text-red-300" onClick={onQuit}>ABANDON RUN</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function EndScreen({ stats, onRetry, onMenu }: { stats: RunStats; onRetry: () => void; onMenu: () => void }) {
-  const won = stats.won;
-  return (
-    <div data-ui className="absolute inset-0 z-40 flex items-center justify-center bg-black/75 p-4 anim-fade-in">
-      <div className="anim-fade-in-up w-full max-w-md text-center">
-        {won ? (
-          <>
-            <div className="text-6xl" style={{ filter: "drop-shadow(0 0 24px rgba(240,199,94,0.9))" }}>🌅</div>
-            <h2 className="font-display gold-text mt-3 text-5xl font-black tracking-[0.15em]">DAWN RECLAIMED</h2>
-            <p className="mt-2 text-sm text-amber-100/80">Death itself has fallen to your blade. The night is over.</p>
-          </>
-        ) : (
-          <>
-            <div className="text-6xl" style={{ filter: "drop-shadow(0 0 24px rgba(196,58,58,0.9))" }}>💀</div>
-            <h2 className="font-display title-glow mt-3 text-5xl font-black tracking-[0.15em] text-red-500">YOU DIED</h2>
-            <p className="mt-2 text-sm text-zinc-400">The dark claims another hunter{stats.time >= GAME_DURATION ? " — at the very threshold of dawn." : "."}</p>
-          </>
-        )}
-        <div className="panel mx-auto mt-6 grid grid-cols-2 gap-x-6 gap-y-2.5 p-5 text-left text-sm">
-          <Stat label="Survived" value={fmtTime(Math.min(stats.time, GAME_DURATION))} />
-          <Stat label="Level" value={`${stats.level}`} />
-          <Stat label="Slain" value={stats.kills.toLocaleString()} />
-          <Stat label="Damage" value={Math.round(stats.damageDealt).toLocaleString()} />
-          <Stat label="Gold earned" value={`🪙 ${stats.gold}`} />
-          <Stat label="Verdict" value={won ? "LEGEND" : "FALLEN"} />
-        </div>
-        <div className="mt-6 flex justify-center gap-3">
-          <button className="btn-gold rounded-lg px-8 py-2.5 font-bold" onClick={onRetry}>{won ? "HUNT AGAIN" : "RETRY"}</button>
-          <button className="btn-ghost rounded-lg px-6 py-2.5" onClick={onMenu}>MENU</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function Stat({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <div className="text-[10px] uppercase tracking-[0.2em] text-zinc-500">{label}</div>
-      <div className="font-display text-lg font-bold text-zinc-100">{value}</div>
-    </div>
-  );
+type QaScenario = { hunter: CharacterId; minute: number; density: number; fullBuild: boolean; boss: "none" | "colossus" | "lich" | "death"; phase: RunPhase; invulnerable: boolean; seed: number };
+function QaLab({ onLaunch, onPause, onResume }: { onLaunch: (scenario: QaScenario) => void; onPause: () => void; onResume: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [scenario, setScenario] = useState<QaScenario>({ hunter: "knight", minute: 0, density: 10, fullBuild: false, boss: "none", phase: "playing", invulnerable: true, seed: 42 });
+  const update = <K extends keyof QaScenario>(key: K, value: QaScenario[K]) => setScenario(s => ({ ...s, [key]: value }));
+  return <aside className={`qa-lab ${open ? "open" : ""}`} data-ui data-global>
+    <button className="btn-ghost" aria-expanded={open} onClick={() => setOpen(!open)}>QA lab · temporary profile {open ? "−" : "+"}</button>
+    {open && <div className="qa-controls"><p>No real progress is loaded or saved. These scenarios are developer-only and do not establish balanced full-run results.</p>
+      <label>Hunter<select aria-label="QA hunter" value={scenario.hunter} onChange={e => update("hunter", e.target.value as CharacterId)}>{CHARACTERS.map(c => <option value={c.id} key={c.id}>{c.name}</option>)}</select></label>
+      <label>Scenario<select aria-label="QA scenario" value={scenario.phase} onChange={e => update("phase", e.target.value as RunPhase)}>{(["playing", "levelup", "chest", "evolution", "covenant", "paused", "gameover", "victory"] as const).map(phase => <option key={phase} value={phase}>{phase}</option>)}</select></label>
+      <label>Minute<input type="number" aria-label="QA starting minute" min="0" max="30" value={scenario.minute} onChange={e => update("minute", Math.min(30, Math.max(0, Number(e.target.value))))}/></label>
+      <label>Enemies<input type="number" aria-label="QA enemy count" min="0" max="350" value={scenario.density} onChange={e => update("density", Math.min(350, Math.max(0, Number(e.target.value))))}/></label>
+      <label>Boss<select aria-label="QA boss" value={scenario.boss} onChange={e => update("boss", e.target.value as QaScenario["boss"])}>{["none", "colossus", "lich", "death"].map(boss => <option key={boss} value={boss}>{boss}</option>)}</select></label>
+      <label>Seed<input type="number" aria-label="QA random seed" min="1" max="4294967295" value={scenario.seed} onChange={e => update("seed", Math.max(1, Number(e.target.value)))}/></label>
+      <Toggle label="Six max-level weapons/passives" checked={scenario.fullBuild} onChange={v => update("fullBuild", v)}/><Toggle label="Invulnerable" checked={scenario.invulnerable} onChange={v => update("invulnerable", v)}/>
+      <button className="btn-gold" onClick={() => { onLaunch({ ...scenario, fullBuild: scenario.fullBuild || scenario.phase === "evolution" }); setOpen(false); }}>Launch fresh QA hunt</button>
+      <div className="action-row"><button className="btn-ghost" onClick={onPause}>Pause</button><button className="btn-ghost" onClick={onResume}>Resume</button></div>
+    </div>}
+  </aside>;
 }

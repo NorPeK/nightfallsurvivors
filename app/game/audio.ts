@@ -22,7 +22,7 @@ type SfxName =
   | "victory"
   | "evolve";
 
-class AudioEngine {
+export class AudioEngine {
   private ctx: AudioContext | null = null;
   private master: GainNode | null = null;
   private musicGain: GainNode | null = null;
@@ -31,6 +31,66 @@ class AudioEngine {
   private musicTimer: ReturnType<typeof setTimeout> | null = null;
   private musicStep = 0;
   private lastSfx: Record<string, number> = {};
+  private platformEnabled = true;
+  private suspended = false;
+  private unlocked = false;
+  private musicWanted = false;
+  private musicVolume = 0.65;
+  private effectsVolume = 0.8;
+  private intensity: "menu" | "hunt" | "boss" | "dawn" = "hunt";
+  private nextMusicTime = 0;
+  private voices = new Map<AudioScheduledSourceNode, { nodes: AudioNode[]; music: boolean }>();
+  private noiseBuffers = new Map<number, AudioBuffer>();
+
+  get isAudible() { return !this.muted && this.platformEnabled && !this.suspended; }
+
+  private track(source: AudioScheduledSourceNode, nodes: AudioNode[], music = false) {
+    this.voices.set(source, { nodes, music });
+    source.onended = () => {
+      source.disconnect();
+      nodes.forEach((node) => node.disconnect());
+      this.voices.delete(source);
+    };
+  }
+
+  private stopVoices(musicOnly = false) {
+    for (const [source, voice] of this.voices) {
+      if (musicOnly && !voice.music) continue;
+      try { source.stop(); } catch { /* already ended */ }
+      source.disconnect();
+      voice.nodes.forEach((node) => node.disconnect());
+      this.voices.delete(source);
+    }
+  }
+
+  private applyGate() {
+    if (!this.ctx || !this.master) return;
+    this.master.gain.cancelScheduledValues(this.ctx.currentTime);
+    this.master.gain.setValueAtTime(this.isAudible ? 0.55 : 0, this.ctx.currentTime);
+    if (!this.isAudible) {
+      this.cancelMusic();
+      this.stopVoices();
+      void this.ctx.suspend().catch(() => {});
+    } else if (this.unlocked) {
+      void this.ctx.resume().then(() => this.scheduleMusic()).catch(() => {});
+    }
+  }
+
+  setVolumes(music: number, effects: number) {
+    this.musicVolume = Number.isFinite(music) ? Math.max(0, Math.min(1, music)) : 0.65;
+    this.effectsVolume = Number.isFinite(effects) ? Math.max(0, Math.min(1, effects)) : 0.8;
+    if (this.ctx) {
+      this.musicGain?.gain.setTargetAtTime(this.musicVolume * 0.38, this.ctx.currentTime, 0.03);
+      this.sfxGain?.gain.setTargetAtTime(this.effectsVolume, this.ctx.currentTime, 0.03);
+    }
+    if (!this.musicVolume) { this.cancelMusic(); this.stopVoices(true); }
+    else this.scheduleMusic();
+  }
+
+  setPlatformEnabled(enabled: boolean) { this.platformEnabled = enabled; this.applyGate(); }
+  setSuspended(suspended: boolean) { this.suspended = suspended; this.applyGate(); }
+  setIntensity(intensity: "menu" | "hunt" | "boss" | "dawn") { this.intensity = intensity; }
+
 
   init() {
     if (this.ctx) return;
@@ -38,13 +98,13 @@ class AudioEngine {
       const Ctx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       this.ctx = new Ctx();
       this.master = this.ctx.createGain();
-      this.master.gain.value = this.muted ? 0 : 0.6;
+      this.master.gain.value = this.isAudible ? 0.55 : 0;
       this.master.connect(this.ctx.destination);
       this.sfxGain = this.ctx.createGain();
-      this.sfxGain.gain.value = 0.9;
+      this.sfxGain.gain.value = this.effectsVolume;
       this.sfxGain.connect(this.master);
       this.musicGain = this.ctx.createGain();
-      this.musicGain.gain.value = 0.3;
+      this.musicGain.gain.value = this.musicVolume * 0.38;
       this.musicGain.connect(this.master);
     } catch {
       this.ctx = null;
@@ -52,16 +112,12 @@ class AudioEngine {
   }
 
   resume() {
+    this.unlocked = true;
     this.init();
-    this.ctx?.resume();
+    this.applyGate();
   }
 
-  setMuted(m: boolean) {
-    this.muted = m;
-    if (this.master && this.ctx) {
-      this.master.gain.setTargetAtTime(m ? 0 : 0.6, this.ctx.currentTime, 0.05);
-    }
-  }
+  setMuted(muted: boolean) { this.muted = muted; this.applyGate(); }
 
   // ----------------------------------------------------------- SFX
 
@@ -73,7 +129,7 @@ class AudioEngine {
     slideTo?: number,
     delay = 0,
   ) {
-    if (!this.ctx || !this.sfxGain) return;
+    if (!this.ctx || !this.sfxGain || !this.isAudible || this.voices.size >= 64) return;
     const t0 = this.ctx.currentTime + delay;
     const osc = this.ctx.createOscillator();
     const g = this.ctx.createGain();
@@ -83,17 +139,23 @@ class AudioEngine {
     g.gain.setValueAtTime(vol, t0);
     g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
     osc.connect(g).connect(this.sfxGain);
+    this.track(osc, [g]);
     osc.start(t0);
     osc.stop(t0 + dur + 0.02);
   }
 
   private noise(dur: number, vol: number, filterFreq = 1200, delay = 0) {
-    if (!this.ctx || !this.sfxGain) return;
+    if (!this.ctx || !this.sfxGain || !this.isAudible || this.voices.size >= 64) return;
     const t0 = this.ctx.currentTime + delay;
     const len = Math.max(1, Math.floor(this.ctx.sampleRate * dur));
-    const buf = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
-    const data = buf.getChannelData(0);
-    for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
+    let buf = this.noiseBuffers.get(len);
+    if (!buf) {
+      buf = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
+      const data = buf.getChannelData(0);
+      for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
+      if (this.noiseBuffers.size >= 8) this.noiseBuffers.clear();
+      this.noiseBuffers.set(len, buf);
+    }
     const src = this.ctx.createBufferSource();
     src.buffer = buf;
     const filter = this.ctx.createBiquadFilter();
@@ -103,14 +165,15 @@ class AudioEngine {
     g.gain.setValueAtTime(vol, t0);
     g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
     src.connect(filter).connect(g).connect(this.sfxGain);
+    this.track(src, [filter, g]);
     src.start(t0);
   }
 
   sfx(name: SfxName) {
-    if (!this.ctx || this.muted) return;
+    if (!this.ctx || !this.isAudible || this.effectsVolume <= 0) return;
     // rate-limit identical sfx to avoid clipping with hundreds of hits
     const now = performance.now();
-    const minGap: Record<string, number> = { hit: 45, shoot: 60, pickup: 35, slash: 70, zap: 70, gold: 50 };
+    const minGap: Record<string, number> = { hit: 45, shoot: 60, pickup: 35, slash: 70, zap: 70, gold: 50, explosion: 80, fire: 70, frost: 70, heal: 80 };
     const gap = minGap[name] ?? 0;
     if (gap && now - (this.lastSfx[name] ?? 0) < gap) return;
     this.lastSfx[name] = now;
@@ -191,62 +254,83 @@ class AudioEngine {
   // A brooding minor arpeggio loop with a slow bass pulse.
 
   startMusic() {
-    if (!this.ctx || this.musicTimer) return;
-    this.musicStep = 0;
-    const bpm = 132;
-    const stepDur = 60 / bpm / 2; // 8th notes
-    // A harmonic-minor flavored progression: Am, F, Dm, E
-    const chords = [
-      [110, 220, 261.6, 329.6], // A
-      [87.3, 174.6, 220, 261.6], // F
-      [73.4, 146.8, 220, 293.7], // D
-      [82.4, 164.8, 246.9, 311.1], // E
-    ];
+    if (!this.musicWanted) this.musicStep = 0;
+    this.musicWanted = true;
+    this.scheduleMusic();
+  }
+
+  private scheduleMusic() {
+    if (!this.ctx || !this.musicGain || !this.musicWanted || !this.isAudible ||
+        !this.unlocked || this.musicVolume <= 0 || this.musicTimer !== null) return;
+    this.nextMusicTime = this.ctx.currentTime + 0.03;
     const tick = () => {
-      if (!this.ctx || !this.musicGain) return;
-      const stepsPerChord = 16;
-      const chord = chords[Math.floor(this.musicStep / stepsPerChord) % chords.length];
-      const s = this.musicStep % stepsPerChord;
-      const t0 = this.ctx.currentTime;
-
-      // bass on beat
-      if (s % 8 === 0) {
-        const o = this.ctx.createOscillator();
-        const g = this.ctx.createGain();
-        o.type = "triangle";
-        o.frequency.value = chord[0];
-        g.gain.setValueAtTime(0.16, t0);
-        g.gain.exponentialRampToValueAtTime(0.0001, t0 + stepDur * 7);
-        o.connect(g).connect(this.musicGain);
-        o.start(t0);
-        o.stop(t0 + stepDur * 7);
+      this.musicTimer = null;
+      if (!this.ctx || !this.musicGain || !this.musicWanted || !this.isAudible || this.musicVolume <= 0) return;
+      const bpm = this.intensity === "boss" ? 144 : this.intensity === "dawn" ? 100 : 126;
+      const stepDur = 60 / bpm / 2;
+      const chords = this.intensity === "dawn"
+        ? [[110, 220, 277.2, 329.6], [87.3, 174.6, 220, 261.6], [98, 196, 246.9, 293.7], [110, 220, 277.2, 329.6]]
+        : [[110, 220, 261.6, 329.6], [87.3, 174.6, 220, 261.6], [73.4, 146.8, 220, 293.7], [82.4, 164.8, 246.9, 311.1]];
+      // Schedule against AudioContext time; event-loop jitter does not shift the notes.
+      this.nextMusicTime = Math.max(this.nextMusicTime, this.ctx.currentTime);
+      while (this.nextMusicTime < this.ctx.currentTime + 0.12) {
+        const chord = chords[Math.floor(this.musicStep / 16) % chords.length];
+        const step = this.musicStep % 16;
+        const t0 = this.nextMusicTime;
+        if (step % 8 === 0) {
+          const bass = this.ctx.createOscillator();
+          const gain = this.ctx.createGain();
+          bass.type = "triangle";
+          bass.frequency.value = chord[0];
+          gain.gain.setValueAtTime(0.14, t0);
+          gain.gain.exponentialRampToValueAtTime(0.0001, t0 + stepDur * 7);
+          bass.connect(gain).connect(this.musicGain);
+          this.track(bass, [gain], true);
+          bass.start(t0);
+          bass.stop(t0 + stepDur * 7);
+        }
+        const arp = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        const filter = this.ctx.createBiquadFilter();
+        arp.type = this.intensity === "dawn" ? "triangle" : "square";
+        arp.frequency.value = chord[1 + step % 3] * (step % 6 === 5 ? 2 : 1);
+        gain.gain.setValueAtTime(this.intensity === "boss" ? 0.045 : 0.03, t0);
+        gain.gain.exponentialRampToValueAtTime(0.0001, t0 + stepDur * 0.95);
+        filter.type = "lowpass";
+        filter.frequency.value = this.intensity === "boss" ? 1700 : 1100;
+        arp.connect(filter).connect(gain).connect(this.musicGain);
+        this.track(arp, [filter, gain], true);
+        arp.start(t0);
+        arp.stop(t0 + stepDur);
+        this.musicStep++;
+        this.nextMusicTime += stepDur;
       }
-      // arpeggio
-      const arpNote = chord[1 + (s % 3)];
-      const o2 = this.ctx.createOscillator();
-      const g2 = this.ctx.createGain();
-      o2.type = "square";
-      o2.frequency.value = arpNote * (s % 6 === 5 ? 2 : 1);
-      g2.gain.setValueAtTime(0.035, t0);
-      g2.gain.exponentialRampToValueAtTime(0.0001, t0 + stepDur * 0.95);
-      const f = this.ctx.createBiquadFilter();
-      f.type = "lowpass";
-      f.frequency.value = 1400;
-      o2.connect(f).connect(g2).connect(this.musicGain);
-      o2.start(t0);
-      o2.stop(t0 + stepDur);
-
-      this.musicStep++;
-      this.musicTimer = setTimeout(tick, stepDur * 1000);
+      this.musicTimer = setTimeout(tick, 50);
     };
     tick();
   }
 
+  private cancelMusic() {
+    if (this.musicTimer !== null) clearTimeout(this.musicTimer);
+    this.musicTimer = null;
+  }
+
   stopMusic() {
-    if (this.musicTimer) {
-      clearTimeout(this.musicTimer);
-      this.musicTimer = null;
-    }
+    this.musicWanted = false;
+    this.cancelMusic();
+    this.stopVoices(true);
+  }
+
+  dispose() {
+    this.stopMusic();
+    this.stopVoices();
+    const context = this.ctx;
+    this.ctx = null;
+    this.master = this.musicGain = this.sfxGain = null;
+    this.noiseBuffers.clear();
+    this.lastSfx = {};
+    this.unlocked = false;
+    if (context) void context.close().catch(() => {});
   }
 }
 

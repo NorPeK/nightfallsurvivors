@@ -104,6 +104,7 @@ export interface CharacterDef {
   weapon: WeaponId;
   desc: string;
   bonuses: string[];
+  trait?: string;
   stats: Partial<PlayerStats>;
 }
 
@@ -160,6 +161,9 @@ export interface UpgradeOption {
   maxLevel: number;
   isNew: boolean;
   desc: string;
+  detail?: string;
+  partner?: string;
+  evolutionReady?: boolean;
 }
 
 export interface ChestReward {
@@ -178,8 +182,14 @@ export interface HudState {
   maxHp: number;
   kills: number;
   gold: number;
-  weapons: { icon: string; level: number; maxLevel: number; evolved: boolean }[];
-  passives: { icon: string; level: number; maxLevel: number }[];
+  weapons: { id: WeaponId; name: string; desc: string; partner: string; evolutionReady: boolean; icon: string; level: number; maxLevel: number; evolved: boolean }[];
+  passives: { id: PassiveId; name: string; desc: string; icon: string; level: number; maxLevel: number }[];
+  stats: PlayerStats;
+  draftTools: DraftTools;
+  runId: string;
+  finaleTime: number;
+  trait: string;
+  covenant: CovenantState | null;
   boss: { name: string; hp: number; maxHp: number } | null;
 }
 
@@ -190,7 +200,36 @@ export interface RunStats {
   level: number;
   damageDealt: number;
   won: boolean;
+  runId: string;
+  character: CharacterId;
+  abandoned: boolean;
+  cause: string;
+  finaleTime: number;
+  build: string[];
+  weaponIds?: WeaponId[];
+  metrics: RunMetrics;
 }
+
+export interface RunMetrics {
+  damageByWeapon: Record<string, number>;
+  overkill: number;
+  damageTaken: number;
+  healing: number;
+  xpCollected: number;
+  goldBySource: Record<string, number>;
+  bossesDefeated: string[];
+  evolutions: string[];
+}
+
+export interface DraftTools { rerolls: number; skips: number; banishes: number }
+export type CovenantId = "frost" | "precision" | "sanctuary";
+export interface CovenantOption { id: CovenantId; name: string; desc: string }
+export interface CovenantState {
+  status: "offered" | "active" | "reward" | "complete" | "declined" | "failed";
+  x: number; y: number; remaining: number; progress: number; target: number; reward: CovenantId | null;
+}
+
+export type RunPhase = "playing" | "levelup" | "chest" | "paused" | "evolution" | "covenant" | "gameover" | "victory";
 
 export type GamePhase =
   | "menu"
@@ -201,5 +240,7 @@ export type GamePhase =
   | "levelup"
   | "chest"
   | "paused"
+  | "evolution"
+  | "covenant"
   | "gameover"
   | "victory";

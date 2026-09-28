@@ -7,6 +7,8 @@ import type {
   CharacterDef,
   MetaUpgradeDef,
   PlayerStats,
+  WeaponId,
+  CovenantOption,
 } from "./types";
 
 // =====================================================================
@@ -112,7 +114,7 @@ export const WEAPONS: Record<string, WeaponDef> = {
     evolvesWith: "boots",
     evolvedName: "Absolute Zero",
     evolvedIcon: "🧊",
-    evolvedDesc: "Freezing novas erupt around you, locking enemies in ice.",
+    evolvedDesc: "Freezing novas lock nearby foes in ice for 0.7 seconds. Bosses resist freezing.",
     maxLevel: 8,
     levels: [
       { desc: "Fires 3 chilling shards.", damage: 8, cooldown: 1.6, amount: 3, speed: 420, duration: 1.6 },
@@ -178,7 +180,7 @@ export const WEAPONS: Record<string, WeaponDef> = {
     evolvesWith: "magnet",
     evolvedName: "Blade Cyclone",
     evolvedIcon: "🌀",
-    evolvedDesc: "A whirling wall of spectral steel that also draws in treasure.",
+    evolvedDesc: "A wide orbit of spectral steel draws in treasure. Keep foes at blade reach; the inner circle is exposed.",
     maxLevel: 8,
     levels: [
       { desc: "2 blades orbit you.", damage: 10, cooldown: 0, amount: 2, area: 1, speed: 2.4 },
@@ -221,6 +223,7 @@ export const CHARACTERS: CharacterDef[] = [
     color: "#e8e3d4",
     weapon: "swordwave",
     desc: "A steadfast knight who holds the line until dawn.",
+    trait: "Sentinel: after 4 seconds without damage, the next hit is reduced by 40% and releases a short shockwave.",
     bonuses: ["+20% Max HP", "+1 Armor", "Starts with Sword Wave"],
     stats: { maxHp: 120, armor: 1 },
   },
@@ -232,6 +235,7 @@ export const CHARACTERS: CharacterDef[] = [
     color: "#9ee37d",
     weapon: "bow",
     desc: "A swift huntress who strikes from the shadows.",
+    trait: "Windrunner: moving for 3 seconds empowers the next bow volley by 25%.",
     bonuses: ["+10% Move Speed", "+10% Crit Chance", "Starts with Hunter Bow"],
     stats: { moveSpeed: 1.1, critChance: 0.15 },
   },
@@ -243,6 +247,7 @@ export const CHARACTERS: CharacterDef[] = [
     color: "#b78cff",
     weapon: "orb",
     desc: "A frail sorceress wielding overwhelming arcane power.",
+    trait: "Voidcaller: every fourth orb cast slows nearby enemies for one second.",
     bonuses: ["+25% Area", "+10% Damage", "-15% Max HP"],
     stats: { area: 1.25, might: 1.1, maxHp: 85 },
   },
@@ -254,6 +259,7 @@ export const CHARACTERS: CharacterDef[] = [
     color: "#8fd0ff",
     weapon: "daggers",
     desc: "A cursed soul whose blades hunger for vengeance.",
+    trait: "Forsaken: a dagger kill restores 2 HP, at most once every 2 seconds.",
     bonuses: ["+25% Damage", "+5% Move Speed", "-25% Max HP"],
     stats: { might: 1.25, moveSpeed: 1.05, maxHp: 75 },
   },
@@ -367,6 +373,9 @@ export const SWARM_MINUTES = [3, 7, 11, 17, 21, 24, 27];
 // Elite spawns (drop treasure chests) — every other minute starting at 2
 export const ELITE_MINUTES = [2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28];
 
+// Minimum separation between authored elite/swarm admissions and recovery after a boss/Covenant.
+export const ENCOUNTER_SPACING = 12;
+
 // Time-based difficulty scaling
 export function enemyHpScale(t: number): number {
   const m = t / 60;
@@ -381,12 +390,13 @@ export function enemyXpScale(t: number): number {
 
 // XP curve (VS-like)
 export function xpForLevel(level: number): number {
-  // xp needed to go from `level` to `level+1`
-  let req = 5 + (level - 1) * 9;
-  if (level >= 20) req *= 1.35;
-  if (level >= 40) req *= 1.7;
-  return Math.round(req);
+  // Preserve the long-run progression budget; spread milestone multipliers over eight ranks.
+  // This removes abrupt 42% / 75% jumps without flattening the late-game curve.
+  const base = 5 + (Math.max(1, level) - 1) * 9;
+  const ramp = (start: number) => Math.max(0, Math.min(1, (level - start) / 8));
+  return Math.round(base * (1 + .35 * ramp(16)) * (1 + .7 * ramp(36)));
 }
+export const FROST_NOVA_FREEZE = .7;
 
 // =====================================================================
 // META PROGRESSION — VS PowerUp-style permanent shop (gold persists)
@@ -399,7 +409,7 @@ export const META_UPGRADES: MetaUpgradeDef[] = [
   { id: "haste", name: "Haste", icon: "💠", desc: "-2.5% cooldown per rank", maxLevel: 5, baseCost: 180, costGrowth: 1.9, apply: (s, l) => { s.cooldown *= 1 - 0.025 * l; } },
   { id: "magnetism", name: "Magnetism", icon: "🧲", desc: "+15% pickup range per rank", maxLevel: 5, baseCost: 90, costGrowth: 1.8, apply: (s, l) => { s.magnet *= 1 + 0.15 * l; } },
   { id: "fortune", name: "Fortune", icon: "🍀", desc: "+10% luck per rank", maxLevel: 5, baseCost: 140, costGrowth: 1.9, apply: (s, l) => { s.luck *= 1 + 0.1 * l; } },
-  { id: "greed", name: "Greed", icon: "💰", desc: "+10% gold gained per rank", maxLevel: 5, baseCost: 110, costGrowth: 1.9, apply: (s, l) => { s.goldGain *= 1 + 0.1 * l; } },
+  { id: "greed", name: "Greed", icon: "💰", desc: "+10% coin and treasure gold per rank; dawn bonus stays fixed", maxLevel: 5, baseCost: 110, costGrowth: 1.9, apply: (s, l) => { s.goldGain *= 1 + 0.1 * l; } },
   { id: "growth", name: "Growth", icon: "📈", desc: "+5% XP gained per rank", maxLevel: 5, baseCost: 160, costGrowth: 1.9, apply: (s, l) => { s.xpGain *= 1 + 0.05 * l; } },
   { id: "armor", name: "Armor", icon: "🛡️", desc: "+1 armor per rank", maxLevel: 3, baseCost: 200, costGrowth: 2.2, apply: (s, l) => { s.armor += l; } },
   { id: "revival", name: "Revival", icon: "🕊️", desc: "+1 revive per rank", maxLevel: 2, baseCost: 600, costGrowth: 3.0, apply: (s, l) => { s.revives += l; } },
@@ -430,3 +440,27 @@ export const BASE_STATS: PlayerStats = {
 export const GAME_DURATION = 30 * 60; // 30 minutes
 export const MAX_WEAPONS = 6;
 export const MAX_PASSIVES = 6;
+
+/** Resolved values power both combat and truthful upgrade previews. Area means radius multiplier. */
+export function resolveWeaponStats(id: WeaponId, level: number) {
+  const out = { damage: 10, cooldown: 1.5, amount: 1, area: 1, speed: 400, pierce: 0, duration: 2 };
+  for (const rank of WEAPONS[id].levels.slice(0, level)) {
+    for (const key of Object.keys(out) as (keyof typeof out)[]) {
+      if (rank[key] !== undefined) out[key] = rank[key]!;
+    }
+  }
+  return out;
+}
+export function weaponUpgradeDetail(id: WeaponId, level: number): string {
+  const now = resolveWeaponStats(id, level);
+  const before = level > 1 ? resolveWeaponStats(id, level - 1) : null;
+  const labels = { damage: "Damage", cooldown: "Cooldown (s)", amount: "Projectiles", area: "Radius ×", speed: "Speed", pierce: "Extra targets", duration: "Duration (s)" };
+  return (Object.keys(now) as (keyof typeof now)[])
+    .filter((key) => before ? before[key] !== now[key] : ["damage", "cooldown", "amount"].includes(key))
+    .map((key) => `${labels[key]}: ${before ? `${before[key]} → ` : ""}${now[key]}`).join(" · ");
+}
+export const COVENANT_REWARDS: CovenantOption[] = [
+  { id: "frost", name: "Winter Oath", desc: "Frozen enemies take 20% more damage. Pair with Absolute Zero." },
+  { id: "precision", name: "Hunter’s Oath", desc: "Your first hit on a full-health enemy deals 20% more damage. Reward careful opening attacks." },
+  { id: "sanctuary", name: "Mercy Oath", desc: "Collecting meat grants 1 second of protection; healing still caps at maximum health." },
+];

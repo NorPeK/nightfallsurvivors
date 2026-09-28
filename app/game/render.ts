@@ -21,9 +21,103 @@ import {
   enemyBulletSprite,
   daggerSprite,
 } from "./sprites";
-import { WEAPONS } from "./data";
+import { JOYSTICK_RADIUS } from "./input";
+import type { GameSettings } from "./settings";
+
+export function combatViewport(width: number, height: number) {
+  const scale = Math.max(0.5, Math.min(1.5, Math.min(width, height) / 600));
+  return { scale, width: width / scale, height: height / scale };
+}
 
 const TAU = Math.PI * 2;
+
+type MarkerKind = "boss" | "covenant" | "elite" | "chest";
+export type ObjectiveMarker = { kind: MarkerKind; x: number; y: number; angle: number };
+const MARKER_W = 88, MARKER_H = 32;
+
+/** Pure CSS-pixel layout. One target per kind, at most three badges, no hidden world-state updates. */
+export function offscreenMarkers(g: Game, width: number, height: number, settings: GameSettings): ObjectiveMarker[] {
+  if (["menu", "characters", "shop", "howto", "gameover", "victory"].includes(g.phase)) return [];
+  const { scale } = combatViewport(width, height);
+  const candidates: { kind: MarkerKind; x: number; y: number; distance: number }[] = [];
+  const consider = (kind: MarkerKind, worldX: number, worldY: number, radius: number) => {
+    const x = (worldX - g.camX) * scale + width / 2, y = (worldY - g.camY) * scale + height / 2;
+    const r = radius * scale;
+    if (x + r >= 0 && x - r <= width && y + r >= 0 && y - r <= height) return;
+    const distance = (worldX - g.px) ** 2 + (worldY - g.py) ** 2;
+    const previous = candidates.find(c => c.kind === kind);
+    if (!previous) candidates.push({ kind, x, y, distance });
+    else if (distance < previous.distance) Object.assign(previous, { x, y, distance });
+  };
+  if (g.boss && g.boss.hp > 0) consider("boss", g.boss.x, g.boss.y, g.boss.def.radius);
+  if (g.covenant?.status === "active") consider("covenant", g.covenant.x, g.covenant.y, 24);
+  for (const enemy of g.enemies) if (enemy.active && enemy.elite && enemy.hp > 0) consider("elite", enemy.x, enemy.y, enemy.radius);
+  for (const pickup of g.pickups) if (pickup.active && pickup.kind === "chest") consider("chest", pickup.x, pickup.y, 20);
+
+  // Reserve the HUD/equipment/covenant band above, and boss bar below.
+  const landscape = height <= 500 && width > height;
+  const left = MARKER_W / 2 + 12, right = width - left;
+  const top = (landscape ? 150 : 194) + MARKER_H / 2, bottom = height - 64 - MARKER_H / 2;
+  if (right <= left || bottom <= top) return [];
+  const obstacles: { left: number; right: number; top: number; bottom: number }[] = [];
+  const joystick = g.input.joystick;
+  if (joystick.active || settings.joystickMode === "fixed") {
+    const x = joystick.active ? joystick.originX : settings.joystickSide === "left" ? 86 : width - 86;
+    const y = joystick.active ? joystick.originY : height - 100;
+    const r = JOYSTICK_RADIUS + 26;
+    obstacles.push({ left: x - r, right: x + r, top: y - r, bottom: y + r });
+  }
+  if (!settings.onboardingComplete) {
+    const panelWidth = Math.min(landscape ? 380 : 470, width - 32);
+    const panelLeft = landscape ? width - 14 - panelWidth : (width - panelWidth) / 2;
+    obstacles.push({ left: panelLeft - 8, right: panelLeft + panelWidth + 8, top: height - (landscape ? 185 : 225), bottom: height });
+  }
+  const markers: ObjectiveMarker[] = [];
+  const centerX = (left + right) / 2, centerY = (top + bottom) / 2;
+  for (const target of candidates) {
+    if (markers.length === 3) break;
+    const dx = target.x - centerX, dy = target.y - centerY;
+    const tx = dx === 0 ? Infinity : (dx > 0 ? right - centerX : left - centerX) / dx;
+    const ty = dy === 0 ? Infinity : (dy > 0 ? bottom - centerY : top - centerY) / dy;
+    const verticalEdge = tx < ty, t = Math.min(tx, ty);
+    const baseX = centerX + dx * t, baseY = centerY + dy * t;
+    const step = verticalEdge ? MARKER_H + 8 : MARKER_W + 8;
+    // Search along the same edge; never move a badge across the battlefield or onto controls.
+    const slots = Math.ceil((verticalEdge ? bottom - top : right - left) / step);
+    for (let slot = 0; slot <= slots * 2; slot++) {
+      const offset = slot === 0 ? 0 : Math.ceil(slot / 2) * step * (slot % 2 ? 1 : -1);
+      const x = Math.max(left, Math.min(right, baseX + (verticalEdge ? 0 : offset)));
+      const y = Math.max(top, Math.min(bottom, baseY + (verticalEdge ? offset : 0)));
+      const box = { left: x - MARKER_W / 2 - 4, right: x + MARKER_W / 2 + 4, top: y - MARKER_H / 2 - 4, bottom: y + MARKER_H / 2 + 4 };
+      if (obstacles.some(o => box.left < o.right && box.right > o.left && box.top < o.bottom && box.bottom > o.top)) continue;
+      markers.push({ kind: target.kind, x, y, angle: Math.atan2(target.y - y, target.x - (x + 34)) });
+      obstacles.push(box);
+      break;
+    }
+  }
+  return markers;
+}
+
+function drawObjectiveMarkers(ctx: CanvasRenderingContext2D, markers: ObjectiveMarker[], highContrast: boolean) {
+  const colors: Record<MarkerKind, string> = { boss: "#ffaf9c", elite: "#ffc583", covenant: "#d3b6ff", chest: "#f6df8c" };
+  const labels: Record<MarkerKind, string> = { boss: "BOSS", elite: "ELITE", covenant: "RITUAL", chest: "CHEST" };
+  for (const marker of markers) {
+    ctx.save(); ctx.translate(marker.x, marker.y);
+    ctx.fillStyle = "#0b0c15"; ctx.strokeStyle = highContrast ? "#ffffff" : colors[marker.kind]; ctx.lineWidth = highContrast ? 2 : 1;
+    ctx.fillRect(-MARKER_W / 2, -MARKER_H / 2, MARKER_W, MARKER_H);
+    ctx.strokeRect(-MARKER_W / 2, -MARKER_H / 2, MARKER_W, MARKER_H);
+    ctx.fillStyle = ctx.strokeStyle; ctx.font = "bold 10px system-ui, sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText(labels[marker.kind], 2, 1);
+    ctx.beginPath();
+    if (marker.kind === "boss") { ctx.moveTo(-29, -7); ctx.lineTo(-36, 6); ctx.lineTo(-22, 6); ctx.closePath(); }
+    else if (marker.kind === "elite") { ctx.moveTo(-29, -7); ctx.lineTo(-22, 0); ctx.lineTo(-29, 7); ctx.lineTo(-36, 0); ctx.closePath(); }
+    else if (marker.kind === "covenant") { ctx.arc(-29, 0, 6, 0, TAU); ctx.moveTo(-29, -9); ctx.lineTo(-29, 9); ctx.moveTo(-37, 0); ctx.lineTo(-21, 0); }
+    else { ctx.rect(-36, -5, 14, 11); ctx.moveTo(-36, -1); ctx.lineTo(-22, -1); ctx.moveTo(-29, -3); ctx.lineTo(-29, 3); }
+    ctx.stroke();
+    ctx.translate(34, 0); ctx.rotate(marker.angle); ctx.beginPath(); ctx.moveTo(5, 0); ctx.lineTo(-4, -4); ctx.lineTo(-4, 4); ctx.closePath(); ctx.fill();
+    ctx.restore();
+  }
+}
 
 // ---------------------------------------------------------------- ground
 
@@ -266,11 +360,15 @@ function getVignette(W: number, H: number, prog: number): HTMLCanvasElement {
 
 // ---------------------------------------------------------------- main draw
 
-export function renderGame(g: Game, ctx: CanvasRenderingContext2D, W: number, H: number) {
+export function renderGame(g: Game, ctx: CanvasRenderingContext2D, screenW: number, screenH: number, settings: GameSettings) {
+  const viewport = combatViewport(screenW, screenH);
+  const W = viewport.width, H = viewport.height;
+  ctx.save();
+  ctx.scale(viewport.scale, viewport.scale);
   const now = g.time;
   // camera with shake
-  const shx = g.shake > 0 ? (Math.random() - 0.5) * g.shake * 14 : 0;
-  const shy = g.shake > 0 ? (Math.random() - 0.5) * g.shake * 14 : 0;
+  const shx = settings.screenShake && !settings.reducedMotion ? Math.sin(now * 97) * g.shake * 7 : 0;
+  const shy = settings.screenShake && !settings.reducedMotion ? Math.cos(now * 113) * g.shake * 7 : 0;
   const camX = g.camX + shx;
   const camY = g.camY + shy;
   const ox = W / 2 - camX;
@@ -300,20 +398,29 @@ export function renderGame(g: Game, ctx: CanvasRenderingContext2D, W: number, H:
     }
   }
 
+  // Covenant boundaries communicate exactly where defeated foes count.
+  if (g.covenant?.status === "active") {
+    const c = g.covenant;
+    ctx.save(); ctx.strokeStyle = "#cdb5f1"; ctx.lineWidth = 3;
+    ctx.fillStyle = "rgba(144,105,210,0.055)";
+    ctx.setLineDash([12, 10]); ctx.beginPath(); ctx.arc(c.x + ox, c.y + oy, 300, 0, TAU); ctx.fill(); ctx.stroke();
+    ctx.setLineDash([]); ctx.fillStyle = "#eddbff"; ctx.font = "600 16px Georgia, serif"; ctx.textAlign = "center";
+    ctx.fillText("✧", c.x + ox, c.y + oy); ctx.restore();
+  }
+
   // ---- telegraphs (under everything else)
   for (const f of g.fx) {
     if (f.kind !== "telegraph") continue;
     const k = f.t / f.dur;
     ctx.save();
-    if (f.x2 || f.y2) {
+    if (f.shape === "line") {
       // line telegraph (dash)
       ctx.strokeStyle = `rgba(255,40,40,${0.25 + k * 0.3})`;
       ctx.lineWidth = f.radius * 2;
       ctx.lineCap = "round";
       ctx.beginPath();
       ctx.moveTo(f.x + ox, f.y + oy);
-      const a = f.angle;
-      ctx.lineTo(f.x + Math.cos(a) * 600 + ox, f.y + Math.sin(a) * 600 + oy);
+      ctx.lineTo(f.x2 + ox, f.y2 + oy);
       ctx.stroke();
     } else {
       const tx = f.x + ox;
@@ -326,8 +433,8 @@ export function renderGame(g: Game, ctx: CanvasRenderingContext2D, W: number, H:
       ctx.beginPath();
       ctx.arc(tx, ty, f.radius, 0, TAU);
       ctx.fill();
-      // pulsing rim
-      ctx.strokeStyle = `rgba(255,140,60,${0.55 + 0.3 * Math.sin(now * 14)})`;
+      // A steady rim preserves the danger boundary when flashes are disabled.
+      ctx.strokeStyle = `rgba(255,140,60,${settings.screenFlash && !settings.reducedMotion ? 0.55 + 0.3 * Math.sin(now * 14) : 0.8})`;
       ctx.lineWidth = 3;
       ctx.beginPath();
       ctx.arc(tx, ty, f.radius, 0, TAU);
@@ -336,7 +443,7 @@ export function renderGame(g: Game, ctx: CanvasRenderingContext2D, W: number, H:
       ctx.strokeStyle = "rgba(255,190,100,0.8)";
       ctx.lineWidth = 2;
       ctx.setLineDash([8, 10]);
-      ctx.lineDashOffset = now * 60;
+      ctx.lineDashOffset = settings.reducedMotion ? 0 : now * 60;
       ctx.beginPath();
       ctx.arc(tx, ty, Math.max(4, f.radius * (1 - k)), 0, TAU);
       ctx.stroke();
@@ -404,7 +511,7 @@ export function renderGame(g: Game, ctx: CanvasRenderingContext2D, W: number, H:
     if (x < -60 || x > W + 60 || y < -60 || y > H + 60) continue;
     const frozen = e.slowT > 0 && e.slowF === 0;
     const spr =
-      e.hitFlash > 0
+      e.hitFlash > 0 && settings.screenFlash && !settings.reducedMotion
         ? enemyFlashSprite(e.def, e.elite)
         : frozen
           ? enemyFrozenSprite(e.def, e.elite)
@@ -436,7 +543,7 @@ export function renderGame(g: Game, ctx: CanvasRenderingContext2D, W: number, H:
     const b = g.boss;
     const x = b.x + ox;
     const y = b.y + oy;
-    const spr = b.hitFlash > 0 || b.windup > 0 ? bossFlashSprite(b.def) : bossSprite(b.def);
+    const spr = (b.hitFlash > 0 && settings.screenFlash && !settings.reducedMotion) || b.windup > 0 ? bossFlashSprite(b.def) : bossSprite(b.def);
     const bob = 1 + Math.sin(now * 3) * 0.03;
     // ground shadow ring
     ctx.fillStyle = "rgba(0,0,0,0.45)";
@@ -449,7 +556,7 @@ export function renderGame(g: Game, ctx: CanvasRenderingContext2D, W: number, H:
     ctx.drawImage(spr, -spr.width / 2, -spr.height / 2);
     ctx.restore();
     if (b.enraged) {
-      ctx.strokeStyle = `rgba(255,40,40,${0.4 + Math.sin(now * 10) * 0.2})`;
+      ctx.strokeStyle = `rgba(255,40,40,${settings.screenFlash && !settings.reducedMotion ? 0.4 + Math.sin(now * 10) * 0.2 : 0.6})`;
       ctx.lineWidth = 3;
       ctx.beginPath();
       ctx.arc(x, y, b.def.radius + 12, 0, TAU);
@@ -589,13 +696,13 @@ export function renderGame(g: Game, ctx: CanvasRenderingContext2D, W: number, H:
     ctx.fill();
     const spr = playerSprite(g.charId);
     const bob = g.moving ? Math.sin(g.walkT) * 0.07 : Math.sin(now * 2.2) * 0.02;
-    const blink = g.iframes > 0 && Math.floor(now * 14) % 2 === 0;
+    const blink = settings.screenFlash && !settings.reducedMotion && g.iframes > 0 && Math.floor(now * 14) % 2 === 0;
     ctx.save();
     ctx.translate(x, y + (g.moving ? Math.abs(Math.sin(g.walkT)) * -2.5 : 0));
     ctx.scale(g.faceX < 0 ? -(1 + bob) : 1 + bob, 1 - bob);
     if (blink) ctx.globalAlpha = 0.45;
-    if (g.hurtFlash > 0) ctx.filter = "brightness(2) sepia(0.8) hue-rotate(-50deg) saturate(3)";
-    else if (g.healFlash > 0) ctx.filter = "brightness(1.5) hue-rotate(60deg)";
+    if (settings.screenFlash && !settings.reducedMotion && g.hurtFlash > 0) ctx.filter = "brightness(2) sepia(0.8) hue-rotate(-50deg) saturate(3)";
+    else if (settings.screenFlash && !settings.reducedMotion && g.healFlash > 0) ctx.filter = "brightness(1.5) hue-rotate(60deg)";
     ctx.drawImage(spr, -spr.width / 2, -spr.height / 2 - 4);
     ctx.restore();
     if (g.reviveFx > 0) {
@@ -608,8 +715,9 @@ export function renderGame(g: Game, ctx: CanvasRenderingContext2D, W: number, H:
   }
 
   // ---- particles
-  for (const p of g.particles) {
-    if (!p.active) continue;
+  for (let particleIndex = 0; particleIndex < g.particles.length; particleIndex++) {
+    const p = g.particles[particleIndex];
+    if (!p.active || (settings.effectsIntensity === "reduced" && particleIndex % 3 !== 0)) continue;
     const x = p.x + ox;
     const y = p.y + oy;
     const k = Math.max(0, Math.min(1, p.life / p.maxLife));
@@ -748,26 +856,26 @@ export function renderGame(g: Game, ctx: CanvasRenderingContext2D, W: number, H:
   }
 
   // ---- damage numbers
-  g.updateDmgNums(1 / 60);
+
   ctx.textAlign = "center";
   for (const d of g.dmgNums) {
-    if (!d.active) continue;
+    if (!d.active || settings.damageNumbers === "off" || (settings.damageNumbers === "critical" && !d.crit && !d.heal)) continue;
     const x = d.x + ox;
     const y = d.y + oy;
     ctx.globalAlpha = Math.min(1, d.life * 2.4);
     if (d.heal) {
-      ctx.font = "700 15px Rajdhani, sans-serif";
+      ctx.font = "700 15px system-ui, sans-serif";
       ctx.fillStyle = "#6ee7b7";
       ctx.fillText(`+${d.value}`, x, y);
     } else if (d.crit) {
-      ctx.font = "800 19px Rajdhani, sans-serif";
+      ctx.font = "800 19px system-ui, sans-serif";
       ctx.fillStyle = "#ffd166";
       ctx.strokeStyle = "rgba(0,0,0,0.7)";
       ctx.lineWidth = 3;
       ctx.strokeText(`${d.value}`, x, y);
       ctx.fillText(`${d.value}`, x, y);
     } else {
-      ctx.font = "700 13.5px Rajdhani, sans-serif";
+      ctx.font = "700 13.5px system-ui, sans-serif";
       ctx.fillStyle = "#f1f0ff";
       ctx.strokeStyle = "rgba(0,0,0,0.6)";
       ctx.lineWidth = 2.5;
@@ -783,7 +891,7 @@ export function renderGame(g: Game, ctx: CanvasRenderingContext2D, W: number, H:
   ctx.drawImage(getVignette(W, H, prog), 0, 0);
 
   // final boss red pulse
-  if (g.finalPhase && g.boss) {
+  if (g.finalPhase && g.boss && settings.screenFlash && !settings.reducedMotion) {
     ctx.fillStyle = `rgba(140,16,16,${0.05 + Math.sin(now * 3) * 0.03})`;
     ctx.fillRect(0, 0, W, H);
   }
@@ -794,18 +902,43 @@ export function renderGame(g: Game, ctx: CanvasRenderingContext2D, W: number, H:
     const a = (0.35 - hpFrac) / 0.35;
     const vg = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.3, W / 2, H / 2, Math.max(W, H) * 0.6);
     vg.addColorStop(0, "rgba(180,0,0,0)");
-    vg.addColorStop(1, `rgba(180,10,10,${0.28 * a + Math.sin(now * 6) * 0.05 * a})`);
+    vg.addColorStop(1, `rgba(180,10,10,${0.2 * a + (!settings.screenFlash || settings.reducedMotion ? 0 : Math.sin(now * 6) * 0.03 * a)})`);
     ctx.fillStyle = vg;
     ctx.fillRect(0, 0, W, H);
   }
 
-  // ---- virtual joystick (touch)
-  const j = g.input.joystick;
+  // Critical threat outlines remain visible above friendly effects and ambience.
+  for (const f of g.fx) {
+    if (f.kind !== "telegraph") continue;
+    ctx.save();
+    ctx.strokeStyle = settings.highContrast ? "#ffffff" : "#ffb892";
+    ctx.lineWidth = settings.highContrast ? 4 : 2;
+    ctx.setLineDash([9, 6]);
+    ctx.beginPath();
+    if (f.shape === "line") {
+      ctx.moveTo(f.x + ox, f.y + oy);
+      ctx.lineTo(f.x2 + ox, f.y2 + oy);
+    } else ctx.arc(f.x + ox, f.y + oy, f.radius, 0, TAU);
+    ctx.stroke(); ctx.restore();
+  }
+  // A stable locator is deliberately drawn after friendly spell effects.
+  ctx.strokeStyle = settings.highContrast ? "#ffffff" : "rgba(255,240,188,0.75)";
+  ctx.lineWidth = settings.highContrast ? 3 : 1.5;
+  ctx.beginPath(); ctx.ellipse(g.px + ox, g.py + oy + 15, 16, 7, 0, 0, TAU); ctx.stroke();
+  ctx.restore();
+
+  drawObjectiveMarkers(ctx, offscreenMarkers(g, screenW, screenH, settings), settings.highContrast);
+
+  // Joystick is in CSS pixels, independent of camera/world scale.
+  const actualJoystick = g.input.joystick;
+  const showFixed = settings.joystickMode === "fixed" && g.phase === "playing";
+  const fixedX = settings.joystickSide === "left" ? 86 : screenW - 86;
+  const j = actualJoystick.active ? actualJoystick : { active: showFixed, originX: fixedX, originY: screenH - 100, stickX: fixedX, stickY: screenH - 100 };
   if (j.active) {
     const dx = j.stickX - j.originX;
     const dy = j.stickY - j.originY;
     const d = Math.hypot(dx, dy);
-    const max = 56;
+    const max = JOYSTICK_RADIUS;
     const kx = d > max ? (dx / d) * max : dx;
     const ky = d > max ? (dy / d) * max : dy;
     ctx.strokeStyle = "rgba(255,255,255,0.25)";

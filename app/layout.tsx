@@ -10,8 +10,6 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
-  maximumScale: 1,
-  userScalable: false,
   viewportFit: "cover",
   themeColor: "#06060c",
 };
@@ -23,19 +21,6 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className="h-full">
-      <head>
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link
-          rel="preconnect"
-          href="https://fonts.gstatic.com"
-          crossOrigin="anonymous"
-        />
-        {/* Decorative fonts; the game gracefully falls back to system fonts offline */}
-        <link
-          href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700;900&family=Rajdhani:wght@500;600;700&display=swap"
-          rel="stylesheet"
-        />
-      </head>
       <body className="h-full overflow-hidden bg-[#06060c] text-zinc-100 antialiased select-none">
         {children}
       </body>

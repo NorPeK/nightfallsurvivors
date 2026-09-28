@@ -1,12 +1,22 @@
 {
   "name": "norpekgame",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start",
-    "lint": "eslint"
+    "start": "node scripts/serve.mjs",
+    "lint": "eslint",
+    "build:web": "next build",
+    "build:standalone": "node scripts/build-game.mjs standalone",
+    "build:playables": "node scripts/build-game.mjs playables",
+    "build:all": "npm run build:web && npm run build:standalone && npm run build:playables",
+    "preview:playables": "node scripts/serve.mjs --dir dist/playables --port 3001 --csp",
+    "typecheck": "tsc --noEmit --incremental false",
+    "test": "node --import tsx --test tests/*.test.ts",
+    "test:engine": "node --import tsx --test tests/engine*.test.ts",
+    "test:integration": "node --import tsx --test tests/platform*.test.ts tests/save*.test.ts tests/audio*.test.ts",
+    "validate:playables": "node scripts/validate-playables.mjs"
   },
   "dependencies": {
     "next": "^16.3.6",
@@ -18,9 +28,13 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "esbuild": "^0.28.2",
     "eslint": "^9",
     "eslint-config-next": "16.2.9",
+    "fflate": "^0.8.3",
+    "postcss": "^8.5.28",
     "tailwindcss": "^4",
+    "tsx": "^4.23.15",
     "typescript": "^5"
   }
 }
