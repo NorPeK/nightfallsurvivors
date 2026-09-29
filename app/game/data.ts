@@ -3,6 +3,7 @@ import type {
   PassiveDef,
   EnemyDef,
   BossDef,
+  MiniBossDef,
   WaveDef,
   CharacterDef,
   MetaUpgradeDef,
@@ -285,7 +286,7 @@ export const ENEMIES: Record<string, EnemyDef> = {
 };
 
 // =====================================================================
-// BOSSES — at minutes 5, 15 and 30. Beat the 30-minute boss to WIN.
+// MAIN BOSSES — every five minutes. Only Death at 30:00 ends the hunt.
 // =====================================================================
 
 export const BOSSES: BossDef[] = [
@@ -303,6 +304,19 @@ export const BOSSES: BossDef[] = [
     shape: "colossus",
   },
   {
+    id: "bloodwarden",
+    name: "Varkos",
+    title: "The Blood Warden",
+    minute: 10,
+    hp: 3400,
+    speed: 49,
+    damage: 24,
+    radius: 39,
+    color: "#cf7770",
+    glow: "#f04f69",
+    shape: "colossus",
+  },
+  {
     id: "lich",
     name: "Maltheor",
     title: "The Hollow Lich",
@@ -313,6 +327,32 @@ export const BOSSES: BossDef[] = [
     radius: 34,
     color: "#9fe8d8",
     glow: "#3fc8a8",
+    shape: "lich",
+  },
+  {
+    id: "dreadknight",
+    name: "Rhazek",
+    title: "The Dread Knight",
+    minute: 20,
+    hp: 12500,
+    speed: 59,
+    damage: 34,
+    radius: 37,
+    color: "#8aa9db",
+    glow: "#648cff",
+    shape: "death",
+  },
+  {
+    id: "voidseer",
+    name: "Nyxara",
+    title: "The Void Seer",
+    minute: 25,
+    hp: 19500,
+    speed: 56,
+    damage: 37,
+    radius: 36,
+    color: "#d4a7ef",
+    glow: "#be6dff",
     shape: "lich",
   },
   {
@@ -328,6 +368,23 @@ export const BOSSES: BossDef[] = [
     glow: "#8c1010",
     shape: "death",
   },
+];
+
+// Mini-bosses keep their own field presence; they never replace a main boss.
+// Modest XP/gold rewards avoid adding twelve more guaranteed evolution chests.
+export const MINI_BOSSES: MiniBossDef[] = [
+  { id: "gravefang", name: "Gravefang", title: "The First Hunger", minute: 1, enemyId: "ghoul", hp: 150, speed: 52, damage: 8, radius: 24, xp: 18, gold: 12, pattern: "charge" },
+  { id: "bonehex", name: "Bonehex", title: "The Crypt Herald", minute: 3, enemyId: "skeleton", hp: 300, speed: 48, damage: 11, radius: 25, xp: 30, gold: 18, pattern: "volley" },
+  { id: "webmaw", name: "Webmaw", title: "The Buried Matriarch", minute: 7, enemyId: "spider", hp: 1300, speed: 60, damage: 17, radius: 27, xp: 60, gold: 30, pattern: "slam" },
+  { id: "mourningveil", name: "Mourningveil", title: "The Restless Oracle", minute: 9, enemyId: "wraith", hp: 2100, speed: 62, damage: 20, radius: 28, xp: 75, gold: 36, pattern: "volley" },
+  { id: "ashmaw", name: "Ashmaw", title: "The Cinder Hunter", minute: 11, enemyId: "hound", hp: 3200, speed: 70, damage: 22, radius: 27, xp: 90, gold: 42, pattern: "charge" },
+  { id: "gorebell", name: "Gorebell", title: "The Chapel Breaker", minute: 13, enemyId: "brute", hp: 4200, speed: 47, damage: 25, radius: 34, xp: 105, gold: 48, pattern: "slam" },
+  { id: "duskwing", name: "Duskwing", title: "The Fallen Watcher", minute: 17, enemyId: "gargoyle", hp: 6200, speed: 72, damage: 28, radius: 30, xp: 135, gold: 60, pattern: "charge" },
+  { id: "bloodcantor", name: "Bloodcantor", title: "The Scarlet Voice", minute: 19, enemyId: "cultist", hp: 8000, speed: 58, damage: 30, radius: 29, xp: 150, gold: 66, pattern: "volley" },
+  { id: "pitbreaker", name: "Pitbreaker", title: "The Furnace Fist", minute: 21, enemyId: "demon", hp: 10000, speed: 57, damage: 32, radius: 33, xp: 165, gold: 72, pattern: "slam" },
+  { id: "marrowking", name: "Marrowking", title: "The Ossuary Crown", minute: 23, enemyId: "golem", hp: 12000, speed: 48, damage: 34, radius: 38, xp: 180, gold: 78, pattern: "slam" },
+  { id: "nightreaver", name: "Nightreaver", title: "The Last Pursuer", minute: 27, enemyId: "shadow", hp: 15500, speed: 78, damage: 37, radius: 31, xp: 210, gold: 90, pattern: "charge" },
+  { id: "dawnless", name: "Dawnless", title: "The Final Omen", minute: 29, enemyId: "demon", hp: 18500, speed: 65, damage: 39, radius: 35, xp: 225, gold: 96, pattern: "volley" },
 ];
 
 // =====================================================================

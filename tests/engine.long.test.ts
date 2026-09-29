@@ -2,12 +2,12 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { Game } from "../app/game/engine";
 import { Input } from "../app/game/input";
-import { BASE_STATS } from "../app/game/data";
+import { BASE_STATS, BOSSES, MINI_BOSSES, ELITE_MINUTES, SWARM_MINUTES } from "../app/game/data";
 import type { RunStats, UpgradeOption, WeaponId } from "../app/game/types";
 
 // Opt-in because this advances a complete thirty-minute director at 120 Hz.
 // Invulnerability/max equipment isolate scheduling and state. This is not a balance or device benchmark.
-test("continuous Classic director reaches victory with every scheduled event", { skip: process.env.RUN_LONG !== "1" }, () => {
+test("continuous Classic director reaches victory with every scheduled event", { skip: process.env.RUN_LONG !== "1" }, (t) => {
   let draft: UpgradeOption[] = [];
   const results: RunStats[] = [];
   const input = new Input(); let move = { x: 0, y: 0 }; input.getMove = () => move;
@@ -21,14 +21,21 @@ test("continuous Classic director reaches victory with every scheduled event", {
     const angle = game.time * .045; move = { x: Math.cos(angle) * .25, y: Math.sin(angle) * .25 };
     game.step(1 / 120);
     if (i % 7200 === 0) {
-      const snapshot = game.exportSnapshot(); peakSnapshot = Math.max(peakSnapshot, JSON.stringify(snapshot).length);
+      const snapshot = game.exportSnapshot(); peakSnapshot = Math.max(peakSnapshot, Buffer.byteLength(JSON.stringify(snapshot)));
       // Validate periodically that production saves can actually restore their own payload.
       const restore = new Game(new Input(), { onPhaseChange() {}, onHud() {}, onLevelUp() {}, onChest() {}, onBossWarning() {}, onRunEnd() {} }, { autoStart: false });
       assert.equal(restore.importSnapshot(JSON.parse(JSON.stringify(snapshot))), true); restore.dispose();
     }
   }
+  t.diagnostic(JSON.stringify({ simulatedSeconds: +game.time.toFixed(3), mainBosses: game.metrics.bossesDefeated, miniBosses: game.metrics.miniBossesDefeated, miniBossesSpawned: [...game.miniBossesSpawned], elites: game.eliteSpawned.size, swarms: game.swarmSpawned.size, sampledPeakSnapshotBytes: peakSnapshot }));
   assert.equal(results.length, 1); assert.equal(results[0].won, true);
-  assert.deepEqual(game.metrics.bossesDefeated, ["colossus", "lich", "death"]);
-  assert.equal(game.eliteSpawned.size, 14); assert.equal(game.swarmSpawned.size, 7);
+  assert.deepEqual(game.metrics.bossesDefeated, BOSSES.map(b => b.id));
+  assert.equal(new Set(game.metrics.miniBossesDefeated).size, game.metrics.miniBossesDefeated!.length);
+  assert.ok(game.metrics.miniBossesDefeated!.every(id => MINI_BOSSES.some(b => b.id === id)));
+  assert.deepEqual([...game.bossesSpawned], BOSSES.map(b => b.id));
+  assert.deepEqual([...game.miniBossesSpawned], MINI_BOSSES.map(b => b.id));
+  assert.deepEqual([...game.eliteSpawned].sort((a,b) => a-b), ELITE_MINUTES);
+  assert.deepEqual([...game.swarmSpawned].sort((a,b) => a-b), SWARM_MINUTES);
   assert.ok(peakSnapshot < 900_000); assert.ok(game.time >= 1800);
+  game.dispose();
 });

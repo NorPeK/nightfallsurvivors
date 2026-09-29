@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { Game, type Enemy, type Callbacks, type GameSnapshot } from "../app/game/engine";
 import { Input } from "../app/game/input";
-import { BASE_STATS, BOSSES, ENEMIES, WEAPONS, PASSIVES, xpForLevel } from "../app/game/data";
+import { BASE_STATS, BOSSES, ENEMIES, WEAPONS, PASSIVES, MINI_BOSSES, xpForLevel } from "../app/game/data";
 import type { RunStats, UpgradeOption } from "../app/game/types";
 
 type FixtureAccess = {
@@ -42,7 +42,7 @@ test("fatal contact cannot be replaced by a same-frame chest", () => {
 });
 
 test("victory is terminal immediately and settlement is idempotent", () => {
-  const { game, ends } = setup(); game.spawnBoss(BOSSES[2]); game.hp = 1;
+  const { game, ends } = setup(); game.spawnBoss(BOSSES.find(b => b.id === "death")!); game.hp = 1;
   game.hitBoss(1e6, false); game.damagePlayer(1000); game.abandonRun(); game.step(.1);
   assert.equal(game.phase, "victory"); assert.equal(ends.length, 1); assert.equal(ends[0].won, true);
 });
@@ -172,7 +172,7 @@ test("multiple eligible evolutions can be chosen explicitly", () => {
 });
 
 test("Covenants remain optional and award one chosen rule",()=>{
-  const {game,access}=setup({onCovenant(){}});game.time=601;access.updateCovenant(.01);assert.equal(game.phase,"covenant");
+  const {game,access}=setup({onCovenant(){}});game.time=601;game.bossesSpawned=new Set(BOSSES.filter(b=>b.minute<=10).map(b=>b.id));game.miniBossesSpawned=new Set(MINI_BOSSES.filter(b=>b.minute<=10).map(b=>b.id));access.updateCovenant(.01);assert.equal(game.phase,"covenant");
   game.acceptCovenant();assert.equal(game.covenant!.status,"active");game.covenant!.progress=12;access.updateCovenant(.01);
   assert.equal(game.covenant!.status,"reward");assert.equal(game.chooseCovenant("frost"),true);assert.equal(game.chooseCovenant("precision"),false);
 });
@@ -277,7 +277,7 @@ test("snapshot restore preserves recycled pool order and future seeded combat",(
 });
 
 test("authored encounters defer during bosses, recover, and resume in deterministic order",()=>{
-  const original=setup();const g=original.game;g.time=449;g.eliteSpawned=new Set([2,4]);g.swarmSpawned=new Set([3]);g.spawnBoss(BOSSES[0]);
+  const original=setup();const g=original.game;g.time=449;g.miniBossesSpawned=new Set(MINI_BOSSES.map(b=>b.id));g.eliteSpawned=new Set([2,4]);g.swarmSpawned=new Set([3]);g.spawnBoss(BOSSES[0]);
   original.access.updateSpawning(.1,g.time);assert.equal(g.eliteSpawned.has(6),false);assert.equal(g.swarmSpawned.has(7),false);
   g.hitBoss(1e9,false);g.time+=11;original.access.updateSpawning(11,g.time);assert.equal(g.eliteSpawned.has(6),false);
   const restored=setup();assert.equal(restored.game.importSnapshot(g.exportSnapshot()),true);
@@ -291,14 +291,14 @@ test("authored encounters defer during bosses, recover, and resume in determinis
 });
 
 test("Covenants reserve authored admission and bosses retain their scheduled priority",()=>{
-  const {game,access}=setup();game.time=689;game.bossesSpawned.add('colossus');game.eliteSpawned=new Set([2,4,6,8]);game.swarmSpawned=new Set([3,7]);
+  const {game,access}=setup();game.time=689;game.bossesSpawned=new Set(['colossus','bloodwarden']);game.miniBossesSpawned=new Set(MINI_BOSSES.map(b=>b.id));game.eliteSpawned=new Set([2,4,6,8]);game.swarmSpawned=new Set([3,7]);
   game.covenant={status:'active',x:0,y:0,remaining:40,progress:0,target:12,reward:null};access.updateSpawning(1,game.time);assert.equal(game.eliteSpawned.has(10),false);assert.equal(game.swarmSpawned.has(11),false);
   game.covenant.status='failed';game.time+=12;access.updateSpawning(12,game.time);assert.equal(game.eliteSpawned.has(10),true);assert.equal(game.swarmSpawned.has(11),false);
   game.time=900;access.updateSpawning(.01,game.time);assert.equal(game.boss!.def.id,'lich');assert.equal(game.swarmSpawned.has(11),false);
 });
 
 test("authored swarm delivery waits for room for the full ring",()=>{
-  const {game,access}=setup();game.time=209;game.eliteSpawned.add(2);
+  const {game,access}=setup();game.time=209;game.miniBossesSpawned=new Set(MINI_BOSSES.map(b=>b.id));game.eliteSpawned.add(2);
   for(let i=0;i<400;i++)enemy(game,1000+i,0);access.updateSpawning(.1,game.time);assert.equal(game.swarmSpawned.has(3),false);
   for(let i=0;i<40;i++)game.enemies[i].active=false;access.updateSpawning(.1,game.time);assert.equal(game.swarmSpawned.has(3),true);assert.equal(game.enemies.filter(e=>e.active).length,400);
 });

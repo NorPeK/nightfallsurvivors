@@ -16,11 +16,11 @@ npm run build:all
 npm run validate:playables
 ```
 
-Latest local result (0.2.1, September 29): **126 normal tests passed**, with the optional long Classic fixture passed separately after the engine fixes. TypeScript, ESLint, all three builds and archive validation passed. A fresh independent install reproduced identical standalone, ZIP and manifest artifacts; a second time zone also produced the identical ZIP. See [the latest verification](verification-2026-09-29.md) and [independent reproduction](reproducibility-2026-09-29.md) for counts, limits and SHA-256. September 28 records are historical.
+Latest local result (0.3.0, September 29): **143 normal tests passed**, with the optional long Classic fixture passed separately. TypeScript, ESLint, all three production builds, QA build and archive validation passed. See [the boss-update verification](boss-update-0.3.0.md) for artifact hashes and limits. Clean-install/alternate-time-zone reproduction was performed on the previous 0.2.1 candidate; those [historical results](reproducibility-2026-09-29.md) are not a fresh 0.3.0 reproduction claim.
 
 The normal suite covers combat defects, terminal ordering, pool saturation, input resets, persistence/migration/recovery, snapshot restoration, platform lifecycle/audio, content and archive constraints. The optional long fixture continuously steps the authored Classic schedule with an explicitly assisted build. Neither is a human balance test.
 
-The [September 29 balance audit](balance-audit-sept29.md) records 24 completed legal-build bot cases: 22 wins, two early Reaper defeats. It includes bounded reproduction commands, interrupted-attempt evidence and simulation CPU/memory diagnostics. Human first-minute Reaper control and late surplus-draft pacing remain explicit targets. Save command parameters with output; selected hunters/profiles, duration and AI policy materially change interpretation. No telemetry is transmitted.
+The [expanded encounter audit](encounter-diagnostics-2026-09-29.md) records one completed fresh Knight victory with all eighteen bosses defeated, an unfinished Ranger run stopped by the resource ceiling, and a separate assisted full-schedule/save-restore pass. Mage/Reaper were not started in that bounded batch. The [previous 24-case balance audit](balance-audit-sept29.md) describes the old three-boss schedule only. Human first-minute control, late surplus drafts, mini/main overlaps, Dawnless's one-minute window and boss escape routes remain explicit targets. Save command parameters with output; selected hunters/profiles, duration and AI policy materially change interpretation. No telemetry is transmitted.
 
 ## Artifact checks
 
@@ -34,6 +34,8 @@ The [September 29 balance audit](balance-audit-sept29.md) records 24 completed l
 The local preview CSP is deliberately stricter than the published example (no unsafe eval, remote fonts or workers). Test the exact published policy in the official environment as well. See [the test-suite guide](https://developers.google.com/youtube/gaming/playables/reference/test_suite_guide).
 
 ## UI and device matrix
+
+The observations below predate the 0.3.0 expansion. Browser-control timeouts prevented the new encounter visual walkthrough; Journal scrolling, miniature nameplates, warning geometry and overlapping fights must be rechecked on the current build. Automated render tests pass but do not substitute for visual review.
 
 For each row, record browser/OS version, screenshot, input method and pass/fail for menus, shop, drafts, chest/evolution, ritual, pause/build/settings/journal, defeat and victory. Check scroll reachability, focus, pinch/zoom behavior, safe areas, orientation, hostile warnings and pointer cancellation. Emulated touch is supplementary.
 

@@ -588,6 +588,26 @@ button{
 .guide-grid .btn-ghost{
   margin-top:18px;
 }
+.encounter-schedule{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(min(100%,310px),1fr));
+  gap:14px;
+  padding:0;
+  list-style:none;
+}
+.encounter-schedule>li{
+  display:grid;
+  grid-template-columns:auto minmax(0,1fr);
+  gap:16px;
+}
+.encounter-schedule time{
+  color:#f3d08b;
+  font-variant-numeric:tabular-nums;
+  font-size:1.05rem;
+}
+.encounter-schedule h2{
+  margin-top:5px;
+}
 .recipe-formula{
   display:flex;
   flex-wrap:wrap;

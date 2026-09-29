@@ -87,6 +87,22 @@ export interface BossDef {
   shape: "colossus" | "lich" | "death";
 }
 
+/** Named field encounters; authored stats already include their intended minute's strength. */
+export interface MiniBossDef {
+  id: string;
+  name: string;
+  title: string;
+  minute: number;
+  enemyId: string;
+  hp: number;
+  speed: number;
+  damage: number;
+  radius: number;
+  xp: number;
+  gold: number;
+  pattern: "charge" | "volley" | "slam";
+}
+
 export interface WaveDef {
   minute: number;
   enemies: string[]; // enemy ids active this minute
@@ -190,6 +206,7 @@ export interface HudState {
   finaleTime: number;
   trait: string;
   covenant: CovenantState | null;
+  nextEncounter: { name: string; minute: number; kind: "boss" | "miniBoss" } | null;
   boss: { name: string; hp: number; maxHp: number } | null;
 }
 
@@ -218,6 +235,8 @@ export interface RunMetrics {
   xpCollected: number;
   goldBySource: Record<string, number>;
   bossesDefeated: string[];
+  /** Absent in older completed-run records. New runs always initialize it. */
+  miniBossesDefeated?: string[];
   evolutions: string[];
 }
 

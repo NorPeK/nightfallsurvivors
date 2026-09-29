@@ -8,7 +8,7 @@ import { audio } from "../game/audio";
 import { platform } from "../game/platform";
 import { loadProfile, saveProfile, saveProfileOnPause, createDefaultProfile, statsWithMeta, updateSettings, purchaseUpgrade, refundUpgrades, beginRun, checkpointRun, settleRun, withRunSnapshot, setProfileMuted, recoverProfileBackup, ACHIEVEMENTS, type ProfileSave } from "../game/meta";
 import { DEFAULT_SETTINGS, type GameSettings } from "../game/settings";
-import { CHARACTERS, WEAPONS, PASSIVES, META_UPGRADES, metaUpgradeCost, BASE_STATS } from "../game/data";
+import { CHARACTERS, WEAPONS, PASSIVES, META_UPGRADES, metaUpgradeCost, BASE_STATS, BOSSES, MINI_BOSSES } from "../game/data";
 import type { CharacterId, GamePhase, HudState, UpgradeOption, ChestReward, RunStats, CovenantOption, RunPhase } from "../game/types";
 
 const fmtTime = (t: number) => `${Math.floor(t / 60).toString().padStart(2, "0")}:${Math.floor(t % 60).toString().padStart(2, "0")}`;
@@ -16,6 +16,14 @@ const gold = (n: number) => Math.floor(n).toLocaleString();
 const HUNTER_ROLES: Record<CharacterId, { role: string; sigil: string }> = {
   knight: { role: "Enduring guardian", sigil: "♜" }, ranger: { role: "Mobile marksman", sigil: "➶" },
   mage: { role: "Arcane controller", sigil: "✧" }, reaper: { role: "Close-range reaper", sigil: "☾" },
+};
+const BOSS_TIPS: Record<string, string> = {
+  colossus: "Leave the marked slam circle and keep an escape route through summoned skeletons.",
+  bloodwarden: "Step out of the marked charge lane, then dodge the aimed five-bolt fan.",
+  lich: "Find the gaps in radial volleys and watch the marked teleport destination.",
+  dreadknight: "Evade the committed charge and keep moving through three staggered ground slams.",
+  voidseer: "Find the gaps in the warned radial volley and leave the three marked slam circles.",
+  death: "Evade the locked rush and spiral barrage. Defeat Death to reclaim the dawn.",
 };
 type Panel = "settings" | "journal" | "build" | "end-run" | "refund" | "run-error" | "end-saved" | "reload-save" | null;
 type QaMetrics = { samples: number; frames: number; fps: number; p50: number; p95: number; p99: number; width: number; height: number; dpr: number; enemies: number; projectiles: number; pickups: number; particles: number; effects: number };
@@ -294,9 +302,9 @@ export default function GameRoot() {
     </Screen>}
     {profile && <>
       {inRun && hud && !["gameover", "victory"].includes(phase) && <Hud hud={hud} inactive={phase !== "playing" || Boolean(panel)} onPause={() => gameRef.current?.pause()} />}
-      {bossWarning && phase === "playing" && <div className="boss-warning" aria-hidden="true"><span>HARBINGER APPROACHING</span><strong>{bossWarning}</strong></div>}
+      {bossWarning && phase === "playing" && <div className="boss-warning" aria-hidden="true"><span>ENCOUNTER APPROACHING</span><strong>{bossWarning}</strong></div>}
       {!panel && phase === "menu" && <Screen title="NORPEK" eyebrow="NIGHTFALL SURVIVORS" hero>
-        <p className="hero-copy">Hold back the dark. Shape your build. Survive thirty minutes, defeat two harbingers, and face Death to reclaim the dawn.</p>
+        <p className="hero-copy">Hold back the dark. Shape your build. Face twelve mini-bosses and six main bosses across thirty minutes. Defeat Death to reclaim the dawn.</p>
         {(profile.activeRun || (profile.rewardLedger && !profile.rewardLedger.settled)) && <div className="panel resume-card"><strong>An unfinished hunt awaits.</strong><p>{profile.activeRun ? "Resume from your last checkpoint, or end this hunt and keep banked gold." : "Your earned rewards are kept, but no resumable checkpoint is available. End this saved hunt before rebuilding your power-ups."}</p><button className="btn-gold" disabled={!profile.activeRun} onClick={() => {
           const game = gameRef.current; if (!game || !profile.activeRun) return;
           try { if (!game.importSnapshot(profile.activeRun.state)) throw new Error("Invalid checkpoint"); if (game.phase === "playing") game.pause(); setHud(game.hudSnapshot()); audio.resume(); audio.startMusic(); setNotice("Hunt restored. Continue when you are ready."); }
@@ -403,10 +411,11 @@ function Stat({ label, value }: { label: string; value: string }) { return <div 
 
 function Hud({ hud, inactive, onPause }: { hud: HudState; inactive: boolean; onPause: () => void }) {
   const hp = Math.max(0, Math.min(1, hud.hp / hud.maxHp));
+  const nextLabel = hud.nextEncounter && hud.finaleTime <= 0 ? `Next ${hud.nextEncounter.kind === "miniBoss" ? "mini-boss" : "main boss"}: ${hud.nextEncounter.name} at ${fmtTime(hud.nextEncounter.minute * 60)}` : null;
   return <div className="hud" inert={inactive} aria-hidden={inactive} aria-label="Hunt status">
     <div className="xp-track" role="progressbar" aria-label={`Experience, level ${hud.level}`} aria-valuenow={Math.floor(hud.xp)} aria-valuemin={0} aria-valuemax={Math.ceil(hud.xpNext)}><span style={{ width: `${Math.min(1, hud.xp / hud.xpNext) * 100}%` }}/></div>
     <div className="hud-main"><div className="hud-health"><span className="hud-label">VITALITY <b>{Math.ceil(hud.hp)} / {hud.maxHp}</b></span><div role="progressbar" aria-label="Hunter health" aria-valuenow={Math.max(0, Math.ceil(hud.hp))} aria-valuemin={0} aria-valuemax={Math.ceil(hud.maxHp)} className={`health-track ${hp < .35 ? "low" : ""}`}><span style={{ width: `${hp * 100}%` }}/></div><span className="hud-small">LV {hud.level} <span> · {gold(hud.kills)} slain</span></span></div>
-      <div className="hud-time"><strong>{fmtTime(hud.time)}</strong><span>{hud.finaleTime > 0 ? `DEATH +${fmtTime(hud.finaleTime)}` : hud.time < 300 ? "HARBINGER AT 05:00" : hud.time < 900 ? "HARBINGER AT 15:00" : "DEATH AT 30:00"}</span></div>
+      <div className="hud-time"><strong>{fmtTime(hud.time)}</strong><span title={hud.nextEncounter?.name}><span aria-hidden={Boolean(nextLabel)}>{hud.finaleTime > 0 ? `DEATH +${fmtTime(hud.finaleTime)}` : hud.nextEncounter ? `${hud.nextEncounter.kind === "miniBoss" ? "MINI-BOSS" : "BOSS"} AT ${fmtTime(hud.nextEncounter.minute * 60)}` : hud.boss ? "BOSS ENCOUNTER" : "SURVIVE THE NIGHT"}</span>{nextLabel && <span className="sr-only">{nextLabel}</span>}</span></div>
       <div className="hud-actions"><span>{gold(hud.gold)} <small>gold</small></span><button className="btn-ghost" data-ui onClick={onPause} aria-label="Pause hunt">Ⅱ <span>Pause</span></button></div>
     </div>
     <div className="hud-equipment" aria-label="Your equipment">{hud.weapons.map(w => <span key={w.id} title={`${w.name}, ${w.evolved ? "evolved" : `level ${w.level}`}`} className={w.evolved ? "evolved" : ""}><span aria-hidden="true">{w.icon}</span><b>{w.evolved ? "✦" : w.level}</b><span className="sr-only">{w.name}, level {w.level}</span></span>)}<i/>{hud.passives.map(p => <span key={p.id} title={`${p.name}, level ${p.level}`}><span aria-hidden="true">{p.icon}</span><b>{p.level}</b><span className="sr-only">{p.name}, level {p.level}</span></span>)}</div>
@@ -442,12 +451,18 @@ function Toggle({ label, description, checked, onChange }: { label: string; desc
 function Journal({ profile, onBack, onReplayTutorial }: { profile: ProfileSave; onBack: () => void; onReplayTutorial: () => void }) {
   const [tab, setTab] = useState("field");
   return <Screen title="Hunter’s journal" eyebrow="KNOWLEDGE OUTLASTS THE NIGHT" footer={<button className="btn-gold" onClick={onBack}>Back</button>}>
-    <nav className="journal-tabs" aria-label="Journal pages">{[["field", "Field guide"], ["recipes", "Evolutions"], ["records", "Records"]].map(([id, name]) => <button key={id} className={tab === id ? "btn-gold" : "btn-ghost"} aria-pressed={tab === id} onClick={() => setTab(id)}>{name}</button>)}</nav>
+    <nav className="journal-tabs" aria-label="Journal pages">{[["field", "Field guide"], ["encounters", "Boss schedule"], ["recipes", "Evolutions"], ["records", "Records"]].map(([id, name]) => <button key={id} className={tab === id ? "btn-gold" : "btn-ghost"} aria-pressed={tab === id} onClick={() => setTab(id)}>{name}</button>)}</nav>
     {tab === "field" && <div className="guide-grid"><article className="panel"><h2>Move to survive</h2><p>Use WASD, arrow keys, or drag. Your attacks fire automatically. Sword Wave follows the last direction you moved; other weapons seek targets or attack around you.</p><p>Keep open ground behind you. Circling through a gap is safer than running into an unbroken wall of enemies.</p><button className="btn-ghost" onClick={onReplayTutorial}>Show first-run guidance again</button></article>
       <article className="panel"><h2>Build with purpose</h2><p>Glowing gems grant experience. Each level offers a choice. Carry up to six weapons and six passives. Max a weapon, hold its paired passive, then claim a treasure chest to evolve it.</p><p>Reroll, skip and banish charges are limited per hunt. An item you banish will not appear again in that hunt’s drafts.</p></article>
-      <article className="panel"><h2>Read the ground</h2><p>Outlined danger zones warn of incoming attacks. Leave before the countdown closes. Hostile projectiles can hurt you even while you are damaging their source.</p><p>The first two harbingers arrive at 05:00 and 15:00. Death arrives at 30:00. Defeat Death to win; reaching the timer alone is not victory.</p></article>
+      <article className="panel"><h2>Read the ground</h2><p>Outlined danger zones warn of incoming attacks. Leave before the countdown closes. Hostile projectiles can hurt you even while you are damaging their source.</p><p>Mini-bosses begin at 01:00. A main boss arrives every five minutes, ending with Death at 30:00. Open the Boss schedule for exact times and attack tells. Defeat Death to win; reaching the timer alone is not victory.</p></article>
       <article className="panel"><h2>Know your rewards</h2><p>Gems give XP. Coins give permanent gold. Food restores health. Magnets gather nearby gems. Bombs damage the horde. Chests grant rewards and eligible evolutions.</p><p>Earned gold is kept when the hunt ends. Spend it on Power-Ups, or refund permanent upgrades to try another direction.</p></article>
     </div>}
+    {tab === "encounters" && <><p className="section-intro">Twelve mini-bosses and six main bosses punctuate the hunt. Mini-bosses wear a crown and have a named health bar. They resist freezing and knockback, so keep moving while you attack. Edge markers point toward threats beyond the screen.</p>
+      <ol className="encounter-schedule">{[
+        ...MINI_BOSSES.map(b => ({ ...b, kind: "Mini-boss", tip: b.pattern === "charge" ? "Leave the marked charge lane before the rush." : b.pattern === "volley" ? "Move sideways from the marked aim line; watch the gaps between bolts." : "Leave the marked circle before the ground slam." })),
+        ...BOSSES.map(b => ({ ...b, kind: "Main boss", tip: BOSS_TIPS[b.id] ?? "Read the warning zones and keep an escape route open." })),
+      ].sort((a, b) => a.minute - b.minute).map(b => <li className="panel" key={b.id}><time>{fmtTime(b.minute * 60)}</time><div><p className="card-overline">{b.kind}</p><h2>{b.name}</h2><p className="muted">{b.title}</p><p>{b.tip}</p></div></li>)}</ol>
+    </>}
     {tab === "recipes" && <div className="recipe-grid">{Object.values(WEAPONS).map(w => <article className="panel recipe" key={w.id}><p className="card-overline">{w.name} · LEVEL {w.maxLevel}</p><h2>{w.evolvedName}</h2><p className="recipe-formula"><span>{w.name}</span><b>+</b><span>{PASSIVES[w.evolvesWith].name}</span><b>+</b><span>Treasure chest</span></p><p>{w.evolvedDesc}</p></article>)}</div>}
     {tab === "records" && <><div className="result-stats"><Stat label="Best survival" value={fmtTime(profile.bestTime)}/><Stat label="Dawns reclaimed" value={String(profile.wins)}/><Stat label="Hunts completed" value={String(profile.runs)}/><Stat label="Enemies slain" value={gold(profile.totalKills)}/></div>
       <h2 className="subheading">Hunter mastery</h2><div className="guide-grid">{CHARACTERS.map(c => <article className="panel" key={c.id}><h2>{c.name}</h2><p>{profile.mastery[c.id].runs} hunts · {profile.mastery[c.id].wins} victories · best {fmtTime(profile.mastery[c.id].bestTime)}</p><p className="muted">{c.trait}</p></article>)}</div>
@@ -534,10 +549,10 @@ function upgradeBenefit(id: string, rank: number) {
   return values[id] ?? `Rank ${rank}`;
 }
 
-type QaScenario = { hunter: CharacterId; minute: number; density: number; fullBuild: boolean; boss: "none" | "colossus" | "lich" | "death"; phase: RunPhase; invulnerable: boolean; seed: number };
+type QaScenario = { hunter: CharacterId; minute: number; density: number; fullBuild: boolean; boss: string; miniBoss: string; phase: RunPhase; invulnerable: boolean; seed: number };
 function QaLab({ metrics, phase, onResetMetrics, onCapture, onLaunch, onPause, onResume }: { metrics: QaMetrics | null; phase: GamePhase; onResetMetrics: () => void; onCapture: () => void; onLaunch: (scenario: QaScenario) => void; onPause: () => void; onResume: () => void }) {
   const [open, setOpen] = useState(false);
-  const [scenario, setScenario] = useState<QaScenario>({ hunter: "knight", minute: 0, density: 10, fullBuild: false, boss: "none", phase: "playing", invulnerable: true, seed: 42 });
+  const [scenario, setScenario] = useState<QaScenario>({ hunter: "knight", minute: 0, density: 10, fullBuild: false, boss: "none", miniBoss: "none", phase: "playing", invulnerable: true, seed: 42 });
   const update = <K extends keyof QaScenario>(key: K, value: QaScenario[K]) => setScenario(s => ({ ...s, [key]: value }));
   return <aside className={`qa-lab ${open ? "open" : ""}`} data-ui data-global>
     <button className="btn-ghost" aria-expanded={open} onClick={() => setOpen(!open)}>QA lab · temporary profile {open ? "−" : "+"}</button>
@@ -554,7 +569,8 @@ function QaLab({ metrics, phase, onResetMetrics, onCapture, onLaunch, onPause, o
       <label>Scenario<select aria-label="QA scenario" value={scenario.phase} onChange={e => update("phase", e.target.value as RunPhase)}>{(["playing", "levelup", "chest", "evolution", "covenant", "paused", "gameover", "victory"] as const).map(phase => <option key={phase} value={phase}>{phase}</option>)}</select></label>
       <label>Minute<input type="number" aria-label="QA starting minute" min="0" max="30" value={scenario.minute} onChange={e => update("minute", Math.min(30, Math.max(0, Number(e.target.value))))}/></label>
       <label>Enemies<input type="number" aria-label="QA enemy count" min="0" max="350" value={scenario.density} onChange={e => update("density", Math.min(350, Math.max(0, Number(e.target.value))))}/></label>
-      <label>Boss<select aria-label="QA boss" value={scenario.boss} onChange={e => update("boss", e.target.value as QaScenario["boss"])}>{["none", "colossus", "lich", "death"].map(boss => <option key={boss} value={boss}>{boss}</option>)}</select></label>
+      <label>Boss<select aria-label="QA boss" value={scenario.boss} onChange={e => update("boss", e.target.value as QaScenario["boss"])}><option value="none">None</option>{BOSSES.map(boss => <option key={boss.id} value={boss.id}>{fmtTime(boss.minute * 60)} · {boss.name}</option>)}</select></label>
+      <label>Mini-boss<select aria-label="QA mini-boss" value={scenario.miniBoss} onChange={e => update("miniBoss", e.target.value)}><option value="none">None</option>{MINI_BOSSES.map(boss => <option key={boss.id} value={boss.id}>{fmtTime(boss.minute * 60)} · {boss.name}</option>)}</select></label>
       <label>Seed<input type="number" aria-label="QA random seed" min="1" max="4294967295" value={scenario.seed} onChange={e => update("seed", Math.max(1, Number(e.target.value)))}/></label>
       <Toggle label="Six max-level weapons/passives" checked={scenario.fullBuild} onChange={v => update("fullBuild", v)}/><Toggle label="Invulnerable" checked={scenario.invulnerable} onChange={v => update("invulnerable", v)}/>
       <button className="btn-gold" onClick={() => { onLaunch({ ...scenario, fullBuild: scenario.fullBuild || scenario.phase === "evolution" }); setOpen(false); }}>Launch fresh QA hunt</button>

@@ -1,5 +1,5 @@
 import type { CharacterId, MetaSave, PlayerStats, RunStats } from "./types";
-import { BASE_STATS, ENEMIES, META_UPGRADES, WEAPONS, metaUpgradeCost } from "./data";
+import { BASE_STATS, BOSSES, ENEMIES, META_UPGRADES, MINI_BOSSES, WEAPONS, metaUpgradeCost } from "./data";
 import { platform } from "./platform";
 import { initialSettings, isHunter, normalizeSettings, type GameSettings } from "./settings";
 
@@ -76,7 +76,7 @@ const emptyMastery = (): HunterMastery => ({ runs: 0, wins: 0, kills: 0, bestTim
 const emptyStats = (): RunStats => ({
   time: 0, kills: 0, gold: 0, level: 1, damageDealt: 0, won: false,
   runId: "", character: "knight", abandoned: false, cause: "", finaleTime: 0, build: [],
-  metrics: { damageByWeapon: {}, overkill: 0, damageTaken: 0, healing: 0, xpCollected: 0, goldBySource: {}, bossesDefeated: [], evolutions: [] },
+  metrics: { damageByWeapon: {}, overkill: 0, damageTaken: 0, healing: 0, xpCollected: 0, goldBySource: {}, bossesDefeated: [], miniBossesDefeated: [], evolutions: [] },
 });
 const knownList = (value: unknown, keys: string[]): string[] => Array.isArray(value)
   ? [...new Set(value.filter((v): v is string => typeof v === "string" && keys.includes(v)))].slice(0, keys.length) : [];
@@ -112,7 +112,9 @@ function readStats(value: unknown): RunStats {
     metrics: { damageByWeapon: amounts(metrics.damageByWeapon), goldBySource: amounts(metrics.goldBySource),
       overkill: boundedNumber(metrics.overkill, 0, 1e15), damageTaken: boundedNumber(metrics.damageTaken, 0, 1e15),
       healing: boundedNumber(metrics.healing, 0, 1e15), xpCollected: boundedNumber(metrics.xpCollected, 0, 1e15),
-      bossesDefeated: knownList(metrics.bossesDefeated, ["colossus", "lich", "death"]), evolutions: knownList(metrics.evolutions, Object.keys(WEAPONS)),
+      bossesDefeated: knownList(metrics.bossesDefeated, BOSSES.map(b => b.id)),
+      miniBossesDefeated: knownList(metrics.miniBossesDefeated, MINI_BOSSES.map(b => b.id)),
+      evolutions: knownList(metrics.evolutions, Object.keys(WEAPONS)),
     },
   };
 }

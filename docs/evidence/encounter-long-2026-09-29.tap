@@ -1,0 +1,10 @@
+✔ continuous Classic director reaches victory with every scheduled event (141988.38825ms)
+ℹ {"simulatedSeconds":1814.675,"mainBosses":["colossus","bloodwarden","lich","dreadknight","voidseer","death"],"miniBosses":["gravefang","bonehex","webmaw","mourningveil","ashmaw","gorebell","duskwing","bloodcantor","pitbreaker","marrowking","nightreaver"],"miniBossesSpawned":["gravefang","bonehex","webmaw","mourningveil","ashmaw","gorebell","duskwing","bloodcantor","pitbreaker","marrowking","nightreaver","dawnless"],"elites":14,"swarms":7,"sampledPeakSnapshotBytes":55327}
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 143256.265542

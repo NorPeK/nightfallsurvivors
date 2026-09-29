@@ -10,7 +10,7 @@ import type { RunStats } from "../app/game/types";
 import { GamePlatform, SAVE_KEY, type PlayablesSdk } from "../app/game/platform";
 import { Game } from "../app/game/engine";
 import { Input } from "../app/game/input";
-import { BASE_STATS } from "../app/game/data";
+import { BASE_STATS, BOSSES, MINI_BOSSES } from "../app/game/data";
 
 function stats(overrides: Partial<RunStats> = {}): RunStats {
   return { time: 100, kills: 20, gold: 30.5, level: 4, damageDealt: 400, won: false, runId: "run-1", character: "knight",
@@ -55,6 +55,22 @@ test("unknown content IDs are ignored without granting stats or losing valid ite
   assert.deepEqual(p.upgrades, { might: 1 });
   assert.deepEqual(p.discoveries.weapons, ["bow"]);
   assert.equal(statsWithMeta(p).might, 1.05);
+});
+
+test("all new main and mini-boss victories survive checkpoint, settlement and profile reload", () => {
+  const metrics = { ...stats().metrics, bossesDefeated: BOSSES.map(b => b.id), miniBossesDefeated: MINI_BOSSES.map(b => b.id) };
+  const details = stats({ time: 1830, won: true, metrics });
+  const pending = checkpointRun(beginRun(createDefaultProfile(), "run-1", "knight"), "run-1", details.gold, details);
+  const reloaded = parseProfile(JSON.stringify(pending));
+  assert.deepEqual(reloaded.rewardLedger?.latestStats.metrics.bossesDefeated, metrics.bossesDefeated);
+  assert.deepEqual(reloaded.rewardLedger?.latestStats.metrics.miniBossesDefeated, metrics.miniBossesDefeated);
+  const settled = parseProfile(JSON.stringify(settleRun(reloaded, "run-1", details)));
+  assert.deepEqual(settled.history[0].metrics.bossesDefeated, metrics.bossesDefeated);
+  assert.deepEqual(settled.history[0].metrics.miniBossesDefeated, metrics.miniBossesDefeated);
+  assert.equal(settled.gold, details.gold);
+  const oldDetails = stats();
+  const old = parseProfile(JSON.stringify(settleRun(beginRun(createDefaultProfile(), "run-1", "knight"), "run-1", oldDetails)));
+  assert.deepEqual(old.history[0].metrics.miniBossesDefeated, []);
 });
 
 test("settings normalize unsafe values and retain valid independent preferences", () => {

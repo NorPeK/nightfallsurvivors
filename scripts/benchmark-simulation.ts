@@ -5,26 +5,30 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { Game } from "../app/game/engine";
 import { Input } from "../app/game/input";
-import { BASE_STATS, BOSSES, ELITE_MINUTES, ENEMIES, META_UPGRADES, SWARM_MINUTES } from "../app/game/data";
+import { BASE_STATS, BOSSES, ELITE_MINUTES, ENEMIES, META_UPGRADES, MINI_BOSSES, SWARM_MINUTES } from "../app/game/data";
 import type { WeaponId } from "../app/game/types";
 
 const seconds = Number(process.env.BENCHMARK_SECONDS ?? 20);
 if (!Number.isFinite(seconds) || seconds < 1 || seconds > 60) throw new Error("BENCHMARK_SECONDS must be between1 and60");
 const hash = createHash("sha256");
-for (const path of ["app/game/engine.ts", "app/game/data.ts", "scripts/benchmark-simulation.ts"]) hash.update(path).update(readFileSync(path));
-console.log(JSON.stringify({ metadata: true, sourceHash: hash.digest("hex"), node: process.version, seconds,
+for (const path of ["app/game/engine.ts", "app/game/data.ts", "app/game/types.ts", "scripts/benchmark-simulation.ts"]) hash.update(path).update(readFileSync(path));
+console.log(JSON.stringify({ metadata: true, sourceHash: hash.digest("hex"), node: process.version, seconds, scenes: process.env.BENCHMARK_SCENES ?? "all",
   note: "Fixed120Hz simulation only.5s warmup; memory sampled each simulated second. Targets/player have enormous HP to sustain pressure. No rendering, input dispatch, bot planning, UI or save transport.20CPU-second budget per scene." }));
 
-for (const scene of [{ name: "early", enemies: 80, pickups: 80, minute: 0, full: false, boss: false },
-  { name: "dense", enemies: 300, pickups: 700, minute: 29, full: true, boss: false },
-  { name: "final-boss", enemies: 120, pickups: 200, minute: 30, full: true, boss: true }]) {
+const requestedScenes = process.env.BENCHMARK_SCENES?.split(",");
+const scenes = [{ name: "early", enemies: 80, pickups: 80, minute: 0, full: false, boss: false, mini: false },
+  { name: "dense", enemies: 300, pickups: 700, minute: 29, full: true, boss: false, mini: false },
+  { name: "final-boss", enemies: 120, pickups: 200, minute: 30, full: true, boss: true, mini: false },
+  { name: "main-and-mini", enemies: 120, pickups: 200, minute: 29, full: true, boss: true, mini: true }].filter(scene => !requestedScenes || requestedScenes.includes(scene.name));
+if (!scenes.length) throw new Error("No matching benchmark scenes");
+for (const scene of scenes) {
   const input = new Input();
   const game = new Game(input, { onPhaseChange() {}, onHud() {}, onLevelUp() {}, onChest() {}, onRunEnd() {}, onBossWarning() {} }, { seed: 29092026, autoStart: false });
   const stats = { ...BASE_STATS };
   if (scene.full) for (const upgrade of META_UPGRADES) upgrade.apply(stats, upgrade.maxLevel);
   stats.maxHp = 1e9;
   game.startRun("mage", stats); game.setViewport(1000, 600); game.time = scene.minute * 60; game.spawnTimer = 1e9;
-  game.bossesSpawned = new Set(BOSSES.map(b => b.id)); game.eliteSpawned = new Set(ELITE_MINUTES); game.swarmSpawned = new Set(SWARM_MINUTES);
+  game.bossesSpawned = new Set(BOSSES.map(b => b.id)); game.miniBossesSpawned = new Set(MINI_BOSSES.map(b => b.id)); game.eliteSpawned = new Set(ELITE_MINUTES); game.swarmSpawned = new Set(SWARM_MINUTES);
   if (scene.full) {
     game.weapons = (["orb", "bow", "lightning", "frost", "fire", "aura"] as WeaponId[]).map(id => ({ id, level: 8, evolved: true, timer: 0, alt: 0 }));
     game.passives = (["might", "tome", "crystal", "eagle", "heart", "magnet"] as const).map(id => ({ id, level: 5 }));
@@ -38,8 +42,12 @@ for (const scene of [{ name: "early", enemies: 80, pickups: 80, minute: 0, full:
   }
   for (let i = 0; i < scene.pickups; i++) game.dropPickup("gem", 3000 + i * 7, 3000, 1);
   if (scene.boss) {
-    game.finalPhase = true; game.spawnBoss(BOSSES[2]);
-    Object.assign(game.boss!, { x: 250, y: 0, hp: 4e8, maxHp: 1e9 }); // sustained enraged-finale pressure
+    game.finalPhase = scene.minute >= 30; game.spawnBoss(BOSSES.find(b => b.id === (game.finalPhase ? "death" : "voidseer"))!);
+    Object.assign(game.boss!, { x: 250, y: 0, hp: 4e8, maxHp: 1e9 }); // sustained enraged main-boss pressure
+  }
+  if (scene.mini) {
+    const mini = game.spawnMiniBoss(MINI_BOSSES.at(-1)!)!;
+    Object.assign(mini, { x: -250, y: 0, hp: 1e9, maxHp: 1e9 });
   }
   input.getMove = () => ({ x: Math.cos(game.time * .25), y: Math.sin(game.time * .25) });
   for (let i = 0; i < 600; i++) game.step(1 / 120);

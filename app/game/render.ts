@@ -21,6 +21,7 @@ import {
   enemyBulletSprite,
   daggerSprite,
 } from "./sprites";
+import { MINI_BOSSES } from "./data";
 import { JOYSTICK_RADIUS } from "./input";
 import type { GameSettings } from "./settings";
 
@@ -31,7 +32,7 @@ export function combatViewport(width: number, height: number) {
 
 const TAU = Math.PI * 2;
 
-type MarkerKind = "boss" | "covenant" | "elite" | "chest";
+type MarkerKind = "boss" | "miniBoss" | "covenant" | "elite" | "chest";
 export type ObjectiveMarker = { kind: MarkerKind; x: number; y: number; angle: number };
 const MARKER_W = 88, MARKER_H = 32;
 
@@ -50,8 +51,9 @@ export function offscreenMarkers(g: Game, width: number, height: number, setting
     else if (distance < previous.distance) Object.assign(previous, { x, y, distance });
   };
   if (g.boss && g.boss.hp > 0) consider("boss", g.boss.x, g.boss.y, g.boss.def.radius);
+  for (const enemy of g.enemies) if (enemy.active && enemy.miniBossId && enemy.hp > 0) consider("miniBoss", enemy.x, enemy.y, enemy.radius);
   if (g.covenant?.status === "active") consider("covenant", g.covenant.x, g.covenant.y, 24);
-  for (const enemy of g.enemies) if (enemy.active && enemy.elite && enemy.hp > 0) consider("elite", enemy.x, enemy.y, enemy.radius);
+  for (const enemy of g.enemies) if (enemy.active && enemy.elite && !enemy.miniBossId && enemy.hp > 0) consider("elite", enemy.x, enemy.y, enemy.radius);
   for (const pickup of g.pickups) if (pickup.active && pickup.kind === "chest") consider("chest", pickup.x, pickup.y, 20);
 
   // Reserve the HUD/equipment/covenant band above, and boss bar below.
@@ -99,17 +101,18 @@ export function offscreenMarkers(g: Game, width: number, height: number, setting
 }
 
 function drawObjectiveMarkers(ctx: CanvasRenderingContext2D, markers: ObjectiveMarker[], highContrast: boolean) {
-  const colors: Record<MarkerKind, string> = { boss: "#ffaf9c", elite: "#ffc583", covenant: "#d3b6ff", chest: "#f6df8c" };
-  const labels: Record<MarkerKind, string> = { boss: "BOSS", elite: "ELITE", covenant: "RITUAL", chest: "CHEST" };
+  const colors: Record<MarkerKind, string> = { boss: "#ffaf9c", miniBoss: "#f2bfff", elite: "#ffc583", covenant: "#d3b6ff", chest: "#f6df8c" };
+  const labels: Record<MarkerKind, string> = { boss: "BOSS", miniBoss: "MINIBOSS", elite: "ELITE", covenant: "RITUAL", chest: "CHEST" };
   for (const marker of markers) {
     ctx.save(); ctx.translate(marker.x, marker.y);
     ctx.fillStyle = "#0b0c15"; ctx.strokeStyle = highContrast ? "#ffffff" : colors[marker.kind]; ctx.lineWidth = highContrast ? 2 : 1;
     ctx.fillRect(-MARKER_W / 2, -MARKER_H / 2, MARKER_W, MARKER_H);
     ctx.strokeRect(-MARKER_W / 2, -MARKER_H / 2, MARKER_W, MARKER_H);
-    ctx.fillStyle = ctx.strokeStyle; ctx.font = "bold 10px system-ui, sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillStyle = ctx.strokeStyle; ctx.font = `bold ${marker.kind === "miniBoss" ? 9 : 10}px system-ui, sans-serif`; ctx.textAlign = "center"; ctx.textBaseline = "middle";
     ctx.fillText(labels[marker.kind], 2, 1);
     ctx.beginPath();
     if (marker.kind === "boss") { ctx.moveTo(-29, -7); ctx.lineTo(-36, 6); ctx.lineTo(-22, 6); ctx.closePath(); }
+    else if (marker.kind === "miniBoss") { ctx.moveTo(-36, 5); ctx.lineTo(-36, -5); ctx.lineTo(-32, -1); ctx.lineTo(-29, -7); ctx.lineTo(-26, -1); ctx.lineTo(-22, -5); ctx.lineTo(-22, 5); ctx.closePath(); }
     else if (marker.kind === "elite") { ctx.moveTo(-29, -7); ctx.lineTo(-22, 0); ctx.lineTo(-29, 7); ctx.lineTo(-36, 0); ctx.closePath(); }
     else if (marker.kind === "covenant") { ctx.arc(-29, 0, 6, 0, TAU); ctx.moveTo(-29, -9); ctx.lineTo(-29, 9); ctx.moveTo(-37, 0); ctx.lineTo(-21, 0); }
     else { ctx.rect(-36, -5, 14, 11); ctx.moveTo(-36, -1); ctx.lineTo(-22, -1); ctx.moveTo(-29, -3); ctx.lineTo(-29, 3); }
@@ -512,10 +515,11 @@ export function renderGame(g: Game, ctx: CanvasRenderingContext2D, screenW: numb
     if (x < -60 || x > W + 60 || y < -60 || y > H + 60) continue;
     const frozen = e.slowT > 0 && e.slowF === 0;
     const spr = frozen ? enemyFrozenSprite(e.def, e.elite) : enemySprite(e.def, e.elite);
-    const bob = 1 + Math.sin(e.wobble) * 0.05;
+    const bob = settings.reducedMotion ? 1 : 1 + Math.sin(e.wobble) * 0.05;
+    const spriteScale = e.miniBossId ? e.radius / (e.def.radius * (e.elite ? 1.9 : 1)) : 1;
     ctx.save();
     ctx.translate(x, y);
-    ctx.scale(e.faceX < 0 ? -bob : bob, 2 - bob);
+    ctx.scale((e.faceX < 0 ? -bob : bob) * spriteScale, (2 - bob) * spriteScale);
     ctx.drawImage(spr, -spr.width / 2, -spr.height / 2);
     if (e.hitFlash > 0 && settings.screenFlash && !settings.reducedMotion) {
       // Frequent area hits must not turn the horde into an opaque white wall.
@@ -531,8 +535,18 @@ export function renderGame(g: Game, ctx: CanvasRenderingContext2D, screenW: numb
       ctx.globalAlpha = 1;
     }
     ctx.restore();
-    // elite hp bar
-    if (e.elite) {
+    if (e.miniBossId) {
+      // Stable double rim and crown distinguish named threats even without color.
+      ctx.strokeStyle = "#0b0c15"; ctx.lineWidth = 5;
+      ctx.beginPath(); ctx.ellipse(x, y + e.radius * .5, e.radius + 5, e.radius * .45, 0, 0, TAU); ctx.stroke();
+      ctx.strokeStyle = settings.highContrast ? "#fff" : "#f2bfff"; ctx.lineWidth = 2; ctx.stroke();
+      const crownY = y - e.radius - 3;
+      ctx.beginPath(); ctx.moveTo(x - 10, crownY); ctx.lineTo(x - 10, crownY - 9); ctx.lineTo(x - 5, crownY - 5);
+      ctx.lineTo(x, crownY - 13); ctx.lineTo(x + 5, crownY - 5); ctx.lineTo(x + 10, crownY - 9); ctx.lineTo(x + 10, crownY); ctx.closePath();
+      ctx.fillStyle = "#f2bfff"; ctx.fill(); ctx.strokeStyle = "#0b0c15"; ctx.lineWidth = 2; ctx.stroke();
+    }
+    // Elite HP is local; mini-boss names are painted in CSS pixels above effects below.
+    if (e.elite && !e.miniBossId) {
       const w = 44;
       ctx.fillStyle = "rgba(0,0,0,0.6)";
       ctx.fillRect(x - w / 2, y - e.radius - 14, w, 5);
@@ -942,6 +956,29 @@ export function renderGame(g: Game, ctx: CanvasRenderingContext2D, screenW: numb
   ctx.stroke();
   ctx.restore();
 
+  // Small named plates follow visible mini-bosses instead of stacking global HUD bars.
+  // CSS-pixel text stays readable in narrow portrait and short landscape views.
+  for (const enemy of g.enemies) {
+    if (!enemy.active || !enemy.miniBossId || enemy.hp <= 0) continue;
+    const definition = MINI_BOSSES.find(b => b.id === enemy.miniBossId);
+    if (!definition) continue;
+    const x = (enemy.x - camX) * viewport.scale + screenW / 2;
+    const y = (enemy.y - camY) * viewport.scale + screenH / 2;
+    const radius = enemy.radius * viewport.scale;
+    if (x + radius < 0 || x - radius > screenW || y + radius < 0 || y - radius > screenH) continue;
+    const plateWidth = 96, plateHeight = 29;
+    const plateX = Math.max(3, Math.min(screenW - plateWidth - 3, x - plateWidth / 2));
+    const plateY = Math.max(3, Math.min(screenH - plateHeight - 3, y - radius - 39));
+    ctx.save();
+    ctx.fillStyle = "#0b0c15"; ctx.fillRect(plateX, plateY, plateWidth, plateHeight);
+    ctx.strokeStyle = settings.highContrast ? "#ffffff" : "#f2bfff"; ctx.lineWidth = 1;
+    ctx.strokeRect(plateX, plateY, plateWidth, plateHeight);
+    ctx.fillStyle = "#f9e5ff"; ctx.font = "bold 10px system-ui, sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText(definition.name, plateX + plateWidth / 2, plateY + 9, plateWidth - 8);
+    ctx.fillStyle = "#3e2949"; ctx.fillRect(plateX + 5, plateY + 19, plateWidth - 10, 5);
+    ctx.fillStyle = "#f2bfff"; ctx.fillRect(plateX + 5, plateY + 19, (plateWidth - 10) * Math.max(0, Math.min(1, enemy.hp / enemy.maxHp)), 5);
+    ctx.restore();
+  }
   drawObjectiveMarkers(ctx, offscreenMarkers(g, screenW, screenH, settings), settings.highContrast);
 
   // Joystick is in CSS pixels, independent of camera/world scale.

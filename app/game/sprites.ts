@@ -404,9 +404,9 @@ export function bossSprite(def: BossDef): Sprite {
       case "lich": {
         // tattered floating robe
         const grd = c.createLinearGradient(0, -R, 0, R * 1.2);
-        grd.addColorStop(0, "#2a4a44");
-        grd.addColorStop(0.5, "#173430");
-        grd.addColorStop(1, "rgba(10,30,28,0)");
+        grd.addColorStop(0, `${def.glow}b3`);
+        grd.addColorStop(0.5, `${def.glow}55`);
+        grd.addColorStop(1, `${def.glow}00`);
         c.fillStyle = grd;
         c.beginPath();
         c.moveTo(0, -R);
@@ -426,7 +426,7 @@ export function bossSprite(def: BossDef): Sprite {
         c.arc(-R * 0.14, -R * 0.5, R * 0.1, 0, Math.PI * 2);
         c.arc(R * 0.14, -R * 0.5, R * 0.1, 0, Math.PI * 2);
         c.fill();
-        eyes(c, 0, -R * 0.5, R * 0.14, R * 0.06, "#5dffd8");
+        eyes(c, 0, -R * 0.5, R * 0.14, R * 0.06, def.color);
         // crown
         c.fillStyle = "#ffd166";
         c.shadowColor = "#f0a800";
@@ -446,9 +446,9 @@ export function bossSprite(def: BossDef): Sprite {
       case "death": {
         // the final reaper
         const grd = c.createLinearGradient(0, -R, 0, R * 1.2);
-        grd.addColorStop(0, "#3a0d12");
-        grd.addColorStop(0.5, "#20070c");
-        grd.addColorStop(1, "rgba(20,4,8,0)");
+        grd.addColorStop(0, `${def.glow}b3`);
+        grd.addColorStop(0.5, `${def.glow}55`);
+        grd.addColorStop(1, `${def.glow}00`);
         c.fillStyle = grd;
         c.shadowColor = def.glow;
         c.shadowBlur = 30;
@@ -468,7 +468,7 @@ export function bossSprite(def: BossDef): Sprite {
         c.beginPath();
         c.arc(0, -R * 0.45, R * 0.4, 0, Math.PI * 2);
         c.fill();
-        eyes(c, 0, -R * 0.45, R * 0.17, R * 0.09, "#ff2222");
+        eyes(c, 0, -R * 0.45, R * 0.17, R * 0.09, def.id === "death" ? "#ff2222" : def.color);
         // scythe
         c.strokeStyle = "#8a8d96";
         c.lineWidth = R * 0.1;

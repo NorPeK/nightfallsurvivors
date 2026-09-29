@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.3.0 — expanded boss encounters, September 29, 2026
+
+Local candidate; not deployed or certified. See [the boss update and verification](docs/boss-update-0.3.0.md).
+
+- Added twelve named mini-bosses at minutes 1, 3, 7, 9, 11, 13, 17, 19, 21, 23, 27 and 29, with warned charges, volleys or ground slams, growing combat budgets, control resistance, XP and gold rewards.
+- Expanded main bosses to minutes 5, 10, 15, 20, 25 and 30 with the Blood Warden, Dread Knight and Void Seer. A live main boss is preserved while the next main queues; minis can overlap main fights.
+- Added the next-encounter HUD, all eighteen encounters in the Journal, mini-boss name/health plates, offscreen guidance and distinct main-boss colors.
+- Reserved encounter capacity, thinned routine enemies during fights, and scheduled Covenant offers around the denser boss timetable. Existing dawn cleanup and Death victory rules remain.
+- Added snapshot-v2 migration and encounter history preservation. Older active hunts skip newly introduced historical encounters without receiving unearned rewards.
+- Passed 143 regular regressions, the separate assisted full Classic fixture, typecheck, lint, production/QA builds and package validation. A bounded fresh Knight bot defeated all eighteen bosses; broader human/device balance and the new visual walkthrough remain open.
+
+The profile schema remains 2. Nested engine snapshots are now version 2; follow [save compatibility guidance](docs/save-policy.md) before rolling back.
+
 ## 0.2.1 — follow-up local candidate, September 29, 2026
 
 Not deployed or certified. See [the follow-up verification](docs/verification-2026-09-29.md).

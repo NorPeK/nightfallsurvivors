@@ -2,9 +2,25 @@
 
 Prepared September 27, 2026. Execution authorized September 28, 2026. This is now the living design, implementation and verification record. Baseline audit observations below describe the pre-upgrade source; use the execution ledger for current status.
 
-Reading guide: the September 29 follow-up is the latest candidate record. The September 28 ledger maps every original section and issue to its implementation or explicit deferral; its measurements are historical. Sections 1–22 preserve the original audit, design hypotheses and proposed roadmap. Their words “current,” “proposed” and “next” refer to the September 27 baseline. Use the latest audit and [release checklist](docs/release-checklist.md) for work still required.
+Reading guide: the 0.3.0 boss expansion below is the latest candidate record. The 0.2.1 follow-up and September 28 ledger are historical; the latter maps every original section and issue to its implementation or explicit deferral. Sections 1–22 preserve the original audit, design hypotheses and proposed roadmap. Their words “current,” “proposed” and “next” refer to the September 27 baseline. Use the latest audit and [release checklist](docs/release-checklist.md) for work still required.
 
-## Follow-up audit — September 29, 2026
+## Boss expansion — 0.3.0, September 29, 2026
+
+The requested expanded schedule is implemented and rebuilt. **Mini-bosses: minutes 1, 3, 7, 9, 11, 13, 17, 19, 21, 23, 27, 29. Main bosses: minutes 5, 10, 15, 20, 25, 30.** There are twelve named mini-bosses with charge, volley or slam patterns, and new main bosses at minutes 10, 20 and 25. Their authored health and damage rise through the hunt. The HUD reports the next encounter; the Journal contains all eighteen fights and attack guidance.
+
+| Area | Implemented behavior and evidence |
+| --- | --- |
+| Scheduling and difficulty | Mini-bosses can arrive during a main fight. A still-living main boss keeps its slot; the next main waits instead of overwriting it. Routine enemies thin during encounters, while elites/swarms wait for recovery. Pool saturation defers a mini without losing it. Boundary, overlap and capacity regressions pass. |
+| Attacks and rewards | Committed warnings precede attacks; killing an owner cancels its pending attacks. Mini-bosses resist freeze/knockback and award XP/gold once, without twelve extra guaranteed evolution chests. New main bosses mix charges, volleys and slams. Projectile deaths preserve the correct encounter name. |
+| Covenant and finale | Covenant offers require a clear 57-second window before the next scheduled encounter. The existing dawn handoff remains: surviving ordinary enemies and minis are cleared without rewards, an earlier main is settled, and Death starts the final fight. Dawnless therefore has a one-minute pre-dawn window. |
+| Saves and history | Engine snapshots advance to version 2, preserving live minis and delayed attacks. Legacy snapshots skip newly added encounters whose minutes have already passed, without inventing kills or rewards. Profile schema 2 and the active-run wrapper remain unchanged. History retains all new encounter IDs. |
+| Automated verification | **143 normal regressions pass**, with one optional long test skipped in that command and passed separately. Typecheck, lint, all three production builds, QA build and archive validation pass. The assisted full run delivered all 18 bosses, 14 elites and 7 swarms with checkpoint restores; sampled peak snapshot was 55,327 bytes. |
+| Balance evidence | A fresh Knight seed-1 bot won at 30:21.24 and defeated every main and mini-boss. Ranger remained alive at 11:07.92 when the shared 180-second wall budget stopped the batch; Mage/Reaper were not started. This small sample does not establish all-hunter balance. The previous 22/24 result describes the old three-boss schedule only. |
+| Remaining checks | The browser connection timed out during the new visual walkthrough; no new 0.3.0 visual pass is claimed. Human encounter pacing, late mini clearance, dense overlap readability, Android/iPhone and official YouTube gates remain open. |
+
+Current artifacts: standalone **423,211 bytes**; Playables ZIP **134,334 bytes**, five files / **426,414 bytes uncompressed**, SHA-256 `89b24e05abd88ff6d8db1fee6be96cd1132dbb30f9ed74fd013f83d5f7b92897`. See [the complete boss update](docs/boss-update-0.3.0.md), [encounter diagnostics](docs/encounter-diagnostics-2026-09-29.md) and [release checklist](docs/release-checklist.md). No deployment or submission occurred. Earlier build hashes, three-boss counts and balance measurements below are historical.
+
+## Historical follow-up audit — 0.2.1, September 29, 2026
 
 Candidate **0.2.1 is built and locally verified**. All 126 regular regressions pass; the separate assisted long Classic fixture also passed after the engine fixes. Typecheck, lint, website/standalone/Playables builds and archive validation pass. A fresh independent `npm ci` reproduces both bundles byte for byte, including an alternate-time-zone ZIP rebuild. The original F01–F27 corrections remain in place; this deeper audit identified and corrected the additional interactions below. Nothing has been deployed or submitted, and this is not a claim of perfection or YouTube certification.
 

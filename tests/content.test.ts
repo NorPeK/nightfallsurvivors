@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { BASE_STATS, BOSSES, CHARACTERS, ELITE_MINUTES, ENEMIES, GAME_DURATION, META_UPGRADES, PASSIVES, SWARM_MINUTES, WAVES, WEAPONS, metaUpgradeCost, resolveWeaponStats, weaponUpgradeDetail } from '../app/game/data';
+import { BASE_STATS, BOSSES, CHARACTERS, ELITE_MINUTES, ENEMIES, GAME_DURATION, META_UPGRADES, MINI_BOSSES, PASSIVES, SWARM_MINUTES, WAVES, WEAPONS, metaUpgradeCost, resolveWeaponStats, weaponUpgradeDetail } from '../app/game/data';
 
 test('every hunter and evolution references real content and every weapon rank resolves usable numbers', () => {
   assert.equal(new Set(CHARACTERS.map(c => c.id)).size, CHARACTERS.length);
@@ -56,4 +56,33 @@ test('all permanent rank combinations remain finite and buyable at their publish
   }
   assert.ok(Object.values(stats).every(v => Number.isFinite(v) && v >= 0));
   assert.ok(stats.maxHp > 0 && stats.moveSpeed > 0 && stats.cooldown > 0 && stats.critChance <= 1);
+});
+
+
+test('Classic has exactly the requested mini-boss and main-boss minutes with usable rising budgets', () => {
+  assert.deepEqual(MINI_BOSSES.map(b => b.minute), [1, 3, 7, 9, 11, 13, 17, 19, 21, 23, 27, 29]);
+  assert.deepEqual(BOSSES.map(b => b.minute), [5, 10, 15, 20, 25, 30]);
+  assert.deepEqual([...new Set(MINI_BOSSES.map(b => b.pattern))].sort(), ['charge', 'slam', 'volley']);
+  const encounters = [...MINI_BOSSES, ...BOSSES];
+  assert.equal(new Set(encounters.map(b => b.id)).size, encounters.length);
+  assert.equal(new Set(encounters.map(b => b.minute)).size, encounters.length);
+  for (const schedule of [MINI_BOSSES, BOSSES]) {
+    for (const [index, boss] of schedule.entries()) {
+      assert.ok(boss.name.trim() && boss.title.trim(), boss.id);
+      assert.ok([boss.hp, boss.speed, boss.damage, boss.radius].every(v => Number.isFinite(v) && v > 0), boss.id);
+      if (index) {
+        assert.ok(boss.hp > schedule[index - 1].hp, `${boss.id} HP increases with progression`);
+        assert.ok(boss.damage >= schedule[index - 1].damage, `${boss.id} contact damage does not fall behind`);
+      }
+    }
+  }
+  for (const mini of MINI_BOSSES) {
+    assert.ok(Object.hasOwn(ENEMIES, mini.enemyId), mini.id);
+    assert.ok(Number.isFinite(mini.xp) && mini.xp > 0, mini.id);
+    assert.ok(Number.isSafeInteger(mini.gold) && mini.gold > 0, mini.id);
+    assert.ok(mini.radius <= 50, `${mini.id} fits validated enemy collision bounds`);
+    const nextMain = BOSSES.find(b => b.minute > mini.minute)!;
+    assert.ok(mini.hp < nextMain.hp, `${mini.id} stays below the following main boss health budget`);
+  }
+  assert.equal(BOSSES.at(-1)?.id, 'death');
 });

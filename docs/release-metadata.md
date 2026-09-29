@@ -6,7 +6,7 @@ The existing in-game/website title remains NORPEK: Nightfall Survivors. The list
 
 **Short description:** Hold back the horde, forge a powerful build, and defeat Death to reclaim the dawn.
 
-**Description:** Choose one of four hunters and survive a thirty-minute gothic hunt. Your weapons attack automatically while you dodge enemies, collect experience, and choose upgrades. Combine eight weapons with their paired passives to unlock powerful evolutions. Challenge the harbingers, attempt an optional ritual, and face Death at the end of the night. Earn permanent power-ups, explore hunter mastery, and return with a new build.
+**Description:** Choose one of four hunters and survive a thirty-minute gothic hunt. Your weapons attack automatically while you dodge enemies, collect experience, and choose upgrades. Combine eight weapons with their paired passives to unlock powerful evolutions. Battle twelve mini-bosses and six main bosses, attempt an optional ritual, and defeat Death to reclaim the dawn. Earn permanent power-ups, explore hunter mastery, and return with a new build.
 
 **Controls:** Move with WASD, arrow keys, or mouse/touch drag. Attacks fire automatically. Use the on-screen Pause button or P to pause. Menus support keyboard, mouse and touch. Classic reaches its final encounter at thirty minutes; defeating the final boss can take additional time.
 

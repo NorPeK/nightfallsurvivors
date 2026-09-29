@@ -1,8 +1,8 @@
 # NORPEK: Nightfall Survivors
 
-A gothic, single-player horde-survival game built with TypeScript, Canvas 2D, React, and a statically exported Next.js website. Survive thirty minutes, defeat the harbingers at 5:00 and 15:00, then defeat Death to reclaim the dawn. The final fight may extend past thirty minutes.
+A gothic, single-player horde-survival game built with TypeScript, Canvas 2D, React, and a statically exported Next.js website. Fight twelve mini-bosses throughout the night and a main boss every five minutes. Survive thirty minutes, then defeat Death to reclaim the dawn. The final fight may extend past thirty minutes.
 
-The upgrade is tracked in [plan.md](plan.md). See the [latest verification record](docs/verification-2026-09-29.md), [release checks](docs/release-checklist.md), [known limitations](docs/known-issues.md) and [changelog](CHANGELOG.md). A locally built Playables package is a test candidate, not YouTube certification.
+The upgrade is tracked in [plan.md](plan.md). See the [boss update and verification](docs/boss-update-0.3.0.md), [release checks](docs/release-checklist.md), [known limitations](docs/known-issues.md) and [changelog](CHANGELOG.md). A locally built Playables package is a test candidate, not YouTube certification.
 
 ## Run and build
 
@@ -42,8 +42,9 @@ For the owner's Android and iPhone checks, follow [the phone playtest guide](doc
 - Four hunters have distinct starting weapons, stat tradeoffs and passive signature traits.
 - Eight weapons have eight ranks and paired evolutions. Carry the matching passive at any rank and maximize the weapon, then collect a chest. When multiple evolutions qualify, choose one.
 - Six weapon and six passive slots; three rerolls, two skips and one banish per hunt.
-- A ten-minute optional Covenant offers a limited ritual challenge and a choice of build-changing rewards. Declining costs nothing.
-- Major authored encounters have spacing and wait while bosses or rituals are active. Screen-edge markers prioritize important threats and rewards.
+- An optional Covenant between minutes 10 and 14 offers a limited ritual challenge and a choice of build-changing rewards. It waits for a clear interval between scheduled fights. Declining costs nothing.
+- Mini-bosses arrive at 1, 3, 7, 9, 11, 13, 17, 19, 21, 23, 27 and 29 minutes; main bosses at 5, 10, 15, 20, 25 and 30. The Journal shows the complete schedule and attack guidance. Mini-bosses grant XP/gold; elites and non-final main bosses retain chest rewards.
+- Extra elite/swarm events wait during boss fights or rituals and retain recovery spacing. Mini-bosses can join an unfinished main fight; a later main boss waits for the occupied main-boss slot. Death's 30:00 finale retains priority. Screen-edge markers prioritize important threats and rewards.
 - Collected gold is checkpointed, retained on defeat or ending a hunt, and settled exactly once. Permanent ranks can be refunded at their recorded purchase cost outside an unfinished hunt.
 - The journal contains recipes, controls, boss guidance, discoveries, mastery and recent results. Compatible active hunts can resume from their latest checkpoint.
 

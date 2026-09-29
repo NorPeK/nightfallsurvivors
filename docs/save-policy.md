@@ -2,6 +2,8 @@
 
 Profile schema: **2**. Browser storage key remains `norpek-nightfall-save-v1` to preserve existing installations. Snapshot schema and content compatibility are checked independently by the simulation.
 
+Version 0.3.0 uses **engine snapshot schema 2** inside the unchanged version-1 active-run wrapper. It stores mini-boss identities, delivered encounters, attack timers and delayed actions. Engine schema-1 checkpoints migrate by skipping newly added encounters at or before the saved minute, without adding kill credit or rewards. Future encounters use the expanded schedule. Permanent currency/ranks remain unchanged; older history without mini-boss metrics loads with an empty list.
+
 ## Permanent progress
 
 A run has a unique ID and a cumulative gold ledger. A checkpoint credits only the increase over the already credited total. Defeat, victory and deliberate ending settle the same run once. Starting another hunt records an interrupted attempt from its last durable counters. Fractional gold is kept internally; UI displays whole gold. Shop purchases deduct the actual rank price and store that paid price so refunds are exact. Migrated rank purchases use the historical pricing table.
@@ -28,6 +30,6 @@ Website and YouTube saves are separate. The Playables target never falls back to
 
 1. Retain the candidate ZIP/manifest and deployed source revision together. Record save schema/content version with the release.
 2. Before release, test existing profile migration and representative active snapshots on the new version.
-3. If a release must be withdrawn, prefer rolling forward with a fix that still understands schema 2. The original version-1 implementation does not understand all newer profile/snapshot semantics and is not a safe blind rollback.
+3. If a release must be withdrawn, prefer rolling forward with a fix that understands profile schema 2 and engine snapshot schema 2. The original version-1 implementation is not a safe blind rollback. Versions 0.2.x also do not understand the new active engine snapshots or complete encounter history and should not overwrite a 0.3.0 profile unchecked.
 4. A rollback build must preserve schema-2 permanent fields, reward ledger and paid costs, and explicitly discard only incompatible run state after explanation. Never deploy a migration that resets currency or converts a failed load into a new profile.
 5. Re-run save, settlement, interrupted-run and failure tests against the exact rollback candidate before release.

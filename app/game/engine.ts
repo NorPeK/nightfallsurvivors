@@ -1,8 +1,8 @@
 // =====================================================================
 // NORPEK: Nightfall Survivors — core engine
 // Vampire Survivors-style horde survival: auto weapons, XP gems,
-// level-up drafts, chest evolutions, elites, swarm events and three
-// bosses (5 / 15 / 30 min). Beat the 30-minute boss to win.
+// level-up drafts, chest evolutions, elites, swarm events, twelve mini-bosses and six
+// main bosses (every five minutes). Beat the 30-minute boss to win.
 // =====================================================================
 
 import {
@@ -10,6 +10,7 @@ import {
   PASSIVES,
   ENEMIES,
   BOSSES,
+  MINI_BOSSES,
   WAVES,
   SWARM_MINUTES,
   ELITE_MINUTES,
@@ -31,6 +32,7 @@ import type {
   CharacterId,
   EnemyDef,
   BossDef,
+  MiniBossDef,
   PlayerStats,
   UpgradeOption,
   ChestReward,
@@ -67,6 +69,8 @@ export interface Enemy {
   radius: number;
   xp: number;
   elite: boolean;
+  miniBossId: string | null;
+  attackTimer: number;
   hitFlash: number;
   slowT: number; // remaining slow time
   slowF: number; // speed factor while slowed (0 = frozen)
@@ -126,6 +130,8 @@ export interface Bullet {
 }
 
 export interface EnemyBullet {
+  /** Stored at launch so overlapping or later bosses cannot steal damage attribution. */
+  cause?: string;
   active: boolean;
   x: number;
   y: number;
@@ -188,9 +194,10 @@ export interface Fx {
   angle: number;
   arc: number;
   shape?: "circle" | "line";
+  owner?: number;
 }
 
-interface ScheduledAction { remaining: number; runId: string; owner?: number; kind: "slash" | "lightning" | "meteor" | "slam" | "teleport"; args: number[]; evolved: boolean }
+interface ScheduledAction { remaining: number; runId: string; owner?: number; kind: "slash" | "lightning" | "meteor" | "slam" | "teleport" | "volley"; args: number[]; evolved: boolean }
 
 interface WeaponState {
   id: WeaponId;
@@ -270,6 +277,7 @@ export class Game {
   fx: Fx[] = [];
   boss: Boss | null = null;
   bossesSpawned = new Set<string>();
+  miniBossesSpawned = new Set<string>();
 
   // orbital daggers state
   orbAngle = 0;
@@ -341,7 +349,7 @@ export class Game {
     return {
       id: 0, hitCooldowns: {}, chargeX: 0, chargeY: 0, windup: 0,
       active: false, def: ENEMIES.bat, x: 0, y: 0, hp: 1, maxHp: 1, speed: 0, damage: 0,
-      radius: 10, xp: 1, elite: false, hitFlash: 0, slowT: 0, slowF: 1, kx: 0, ky: 0,
+      radius: 10, xp: 1, elite: false, miniBossId: null, attackTimer: 0, hitFlash: 0, slowT: 0, slowF: 1, kx: 0, ky: 0,
       orbCd: 0, wobble: this.random() * TAU, charge: 0, charging: false, faceX: 1,
     };
   }
@@ -415,6 +423,7 @@ export class Game {
     this.fx = [];
     this.boss = null;
     this.bossesSpawned.clear();
+    this.miniBossesSpawned.clear();
     this.eliteSpawned.clear();
     this.swarmSpawned.clear();
     this.spawnTimer = 0;
@@ -429,7 +438,7 @@ export class Game {
   }
 
   private blankMetrics(): RunMetrics {
-    return { damageByWeapon: {}, overkill: 0, damageTaken: 0, healing: 0, xpCollected: 0, goldBySource: {}, bossesDefeated: [], evolutions: [] };
+    return { damageByWeapon: {}, overkill: 0, damageTaken: 0, healing: 0, xpCollected: 0, goldBySource: {}, bossesDefeated: [], miniBossesDefeated: [], evolutions: [] };
   }
   private random() {
     // Xorshift32: all gameplay decisions use this stream, never renderer/audio randomness.
@@ -515,13 +524,23 @@ export class Game {
     const pending = this.scheduled; this.scheduled = [];
     for (const action of pending) {
       if (this.terminal) return;
-      if (action.runId !== this.runId || (action.owner !== undefined && this.boss?.id !== action.owner)) continue;
+      const owner = action.owner === undefined ? null : this.boss?.id === action.owner ? this.boss : this.enemies.find((e) => e.active && e.id === action.owner);
+      if (action.runId !== this.runId || (action.owner !== undefined && !owner)) continue;
       action.remaining -= dt;
       if (action.remaining > 0) { this.scheduled.push(action); continue; }
       const a = action.args;
       if (action.kind === "slash") this.slash(a[0], a[1], a[2], action.evolved);
       if (action.kind === "lightning") this.lightningStrike(a[0], a[1], a[2], a[3], action.evolved);
-      if (action.kind === "slam") this.bossSlam(a[0], a[1], a[2], a[3]);
+      if (action.kind === "slam") this.bossSlam(a[0], a[1], a[2], a[3], owner ? this.encounterName(owner) : "Colossus slam");
+      if (action.kind === "volley") {
+        const color = owner && "miniBossId" in owner ? "#ffc45b" : owner?.def.color ?? "#ff9f5b";
+        const fullCircle = a[4] >= TAU;
+        for (let i = 0; i < a[3]; i++) {
+          const angle = a[2] + (fullCircle ? i / a[3] * TAU : (i - (a[3] - 1) / 2) * a[4]);
+          this.spawnEnemyBullet(a[0], a[1], Math.cos(angle) * a[5], Math.sin(angle) * a[5], a[6], color, owner ? `${this.encounterName(owner)} projectile` : "Hostile projectile");
+        }
+        audio.sfx("zap");
+      }
       if (action.kind === "teleport" && this.boss) {
         const b = this.boss;
         this.burst(b.x, b.y, 16, b.def.glow, 130);
@@ -617,15 +636,16 @@ export class Game {
 
     const wave = this.waveFor(t);
     const bossAlive = this.boss !== null;
+    const miniAlive = this.enemies.some((e) => e.active && e.miniBossId !== null);
     this.encounterCooldown = Math.max(0, this.encounterCooldown - dt);
 
     this.spawnTimer -= dt;
     if (this.spawnTimer <= 0) {
       // during boss fights the horde thins dramatically so the boss takes
       // the spotlight (and your auto-aim) — VS-style
-      this.spawnTimer = wave.interval * (bossAlive ? 2.6 : 1);
+      this.spawnTimer = wave.interval * (bossAlive ? 2.6 : miniAlive ? 1.6 : 1);
       const alive = this.countEnemies();
-      const cap = bossAlive ? Math.floor(wave.maxAlive * 0.35) : wave.maxAlive;
+      const cap = Math.min(this.enemies.length - 1, Math.floor(wave.maxAlive * (bossAlive ? .35 : miniAlive ? .65 : 1)));
       if (alive < cap) {
         const n = Math.min(wave.perTick, cap - alive);
         for (let i = 0; i < n; i++) {
@@ -635,15 +655,20 @@ export class Game {
       }
     }
 
-    // One authored event can enter at a time. Due events remain pending in the
+    // Mini-bosses have their own pool slots and arrive even if a main fight lingers.
+    // A full pool defers delivery without losing the scheduled encounter.
+    for (const mini of MINI_BOSSES) {
+      if (t >= mini.minute * 60 && !this.miniBossesSpawned.has(mini.id) && !this.spawnMiniBoss(mini)) break;
+    }
+    // Main bosses retain their slot until defeated; later main fights queue in order.
+    const dueBoss = BOSSES.find((b) => b.minute < 30 && t >= b.minute * 60 && !this.bossesSpawned.has(b.id));
+    if (!bossAlive && dueBoss) { this.spawnBoss(dueBoss); return; }
+    // One support event can enter at a time. Due events remain pending in the
     // schedule until admitted; a long boss/Covenant never loses an elite chest.
-    if (bossAlive || this.covenant?.status === "active") {
+    if (bossAlive || this.enemies.some((e) => e.active && e.miniBossId !== null) || this.covenant?.status === "active") {
       this.encounterCooldown = ENCOUNTER_SPACING;
       return;
     }
-    // Bosses keep priority at their authored minute, even during routine recovery.
-    const dueBoss = BOSSES.find((b) => b.minute < 30 && t >= b.minute * 60 && !this.bossesSpawned.has(b.id));
-    if (dueBoss) { this.spawnBoss(dueBoss); return; }
     if (this.encounterCooldown > 0) return;
     const event = AUTHORED_ENCOUNTERS.find((event) => t >= event.at && !(event.kind === "elite" ? this.eliteSpawned : this.swarmSpawned).has(event.minute));
     if (!event) return;
@@ -706,6 +731,7 @@ export class Game {
     slot.radius = def.radius * (elite ? 1.9 : 1);
     slot.xp = def.xp * enemyXpScale(scalingTime) * (elite ? 10 : 1);
     slot.elite = elite;
+    slot.miniBossId = null; slot.attackTimer = 0;
     slot.hitFlash = 0;
     slot.slowT = 0;
     slot.slowF = 1;
@@ -718,6 +744,19 @@ export class Game {
       this.addFx({ kind: "summon", x: slot.x, y: slot.y, x2: 0, y2: 0, t: 0, dur: 0.8, radius: slot.radius * 2.4, color: "#ffd166", angle: 0, arc: 0 });
     }
     return slot;
+  }
+
+  spawnMiniBoss(def: MiniBossDef): Enemy | null {
+    const enemy = this.spawnEnemy(ENEMIES[def.enemyId], false);
+    if (!enemy) return null;
+    const point = this.outsideView(def.radius + 65);
+    Object.assign(enemy, { miniBossId: def.id, x: point.x, y: point.y, hp: def.hp, maxHp: def.hp, speed: def.speed, damage: def.damage, radius: def.radius, xp: def.xp, attackTimer: 2.5, charge: 0 });
+    this.miniBossesSpawned.add(def.id);
+    this.encounterCooldown = ENCOUNTER_SPACING;
+    this.addFx({ kind: "summon", x: enemy.x, y: enemy.y, x2: 0, y2: 0, t: 0, dur: 1, radius: def.radius * 2.4, color: "#ffc45b", angle: 0, arc: 0, owner: enemy.id });
+    audio.sfx("bossSpawn");
+    this.cb.onBossWarning(def.name, `Mini-boss · ${def.title}`);
+    return enemy;
   }
 
   spawnBoss(def: BossDef) {
@@ -763,7 +802,7 @@ export class Game {
     // Dawn claims a lingering earlier boss; resolve its earned encounter rewards exactly once.
     if (this.boss) this.killBoss();
     this.scheduled = [];
-    const final = BOSSES[2];
+    const final = BOSSES.find((boss) => boss.id === "death")!;
     this.spawnBoss(final);
   }
 
@@ -830,7 +869,7 @@ export class Game {
       e.wobble += dt * 6;
 
       let speedF = 1;
-      if (e.windup > 0 && e.def.shape !== "hound") { e.windup = Math.max(0, e.windup - dt); speedF = 0; }
+      if (e.windup > 0 && e.def.shape !== "hound" && !e.miniBossId) { e.windup = Math.max(0, e.windup - dt); speedF = 0; }
       if (e.slowT > 0) {
         e.slowT -= dt;
         speedF *= e.slowF;
@@ -852,8 +891,12 @@ export class Game {
       let vx = (dx / dist) * e.speed * speedF;
       let vy = (dy / dist) * e.speed * speedF;
 
+      if (e.miniBossId) {
+        const movement = this.updateMiniBoss(e, dt, dx, dy, dist, speedF);
+        vx = movement.x; vy = movement.y;
+      }
       // Chargers announce and commit to a direction; freezing stops all voluntary movement.
-      if (e.def.shape === "hound" && speedF > 0) {
+      if (!e.miniBossId && e.def.shape === "hound" && speedF > 0) {
         e.charge -= dt;
         if (e.windup > 0) {
           e.windup -= dt; vx = vy = 0;
@@ -868,7 +911,7 @@ export class Game {
         }
       }
       // wraith drift
-      if (e.def.shape === "wraith" || e.def.shape === "shadow") {
+      if (!e.miniBossId && (e.def.shape === "wraith" || e.def.shape === "shadow")) {
         const s = Math.sin(e.wobble * 0.9) * 40 * speedF;
         vx += (-dy / dist) * s;
         vy += (dx / dist) * s;
@@ -897,10 +940,63 @@ export class Game {
       e.ky *= Math.pow(0.0009, dt);
 
       // contact damage
-      if (!(e.windup > 0 && e.def.shape !== "hound") && Math.hypot(this.px - e.x, this.py - e.y) < e.radius + 14 && this.iframes <= 0) {
-        this.damagePlayer(e.damage, e.def.name);
+      if (!(e.windup > 0 && (e.def.shape !== "hound" || e.miniBossId)) && Math.hypot(this.px - e.x, this.py - e.y) < e.radius + 14 && this.iframes <= 0) {
+        this.damagePlayer(e.damage, this.encounterName(e));
       }
     }
+  }
+
+  private encounterName(entity: Enemy | Boss) {
+    return "miniBossId" in entity && entity.miniBossId ? MINI_BOSSES.find((def) => def.id === entity.miniBossId)?.name ?? entity.def.name : entity.def.name;
+  }
+
+  private cancelOwnedActions(owner: number) {
+    this.scheduled = this.scheduled.filter((action) => action.owner !== owner);
+    this.fx = this.fx.filter((effect) => effect.owner !== owner);
+  }
+
+  private warnSlam(owner: number, x: number, y: number, radius: number, damage: number, delay = 1) {
+    this.addFx({ kind: "telegraph", shape: "circle", x, y, x2: 0, y2: 0, t: 0, dur: delay, radius, color: "#ffb45b", angle: 0, arc: 0, owner });
+    this.schedule(delay, "slam", [x, y, radius, damage], false, owner);
+  }
+
+  private warnVolley(owner: number, x: number, y: number, angle: number, count: number, spread: number, speed: number, damage: number, delay = .85) {
+    const radial = spread >= TAU;
+    if (radial) this.addFx({ kind: "telegraph", shape: "circle", x, y, x2: 0, y2: 0, t: 0, dur: delay, radius: 70, color: "#ffc45b", angle, arc: 0, owner });
+    else for (let i = 0; i < count; i++) {
+      const ray = angle + (i - (count - 1) / 2) * spread;
+      this.addFx({ kind: "telegraph", shape: "line", x, y, x2: x + Math.cos(ray) * 260, y2: y + Math.sin(ray) * 260, t: 0, dur: delay, radius: 7, color: "#ffc45b", angle: ray, arc: 0, owner });
+    }
+    this.schedule(delay, "volley", [x, y, angle, count, spread, speed, damage], false, owner);
+  }
+
+  private updateMiniBoss(e: Enemy, dt: number, dx: number, dy: number, dist: number, speedF: number) {
+    const def = MINI_BOSSES.find((mini) => mini.id === e.miniBossId)!;
+    let x = dx / dist * e.speed * speedF, y = dy / dist * e.speed * speedF;
+    if (e.windup > 0) {
+      e.windup = Math.max(0, e.windup - dt); x = y = 0;
+      if (e.windup === 0 && def.pattern === "charge") { e.charging = true; e.charge = .7; }
+    } else if (e.charging) {
+      e.charge -= dt;
+      x = e.chargeX * e.speed * 3 * speedF; y = e.chargeY * e.speed * 3 * speedF;
+      if (e.charge <= 0) e.charging = false;
+    } else {
+      e.attackTimer -= dt;
+      if (e.attackTimer <= 0 && dist < 650) {
+        e.attackTimer = def.minute < 5 ? 6 : 4.8;
+        if (def.pattern === "charge") {
+          e.windup = .8; e.chargeX = dx / dist; e.chargeY = dy / dist;
+          this.addFx({ kind: "telegraph", shape: "line", x: e.x, y: e.y, x2: e.x + e.chargeX * e.speed * 2.1, y2: e.y + e.chargeY * e.speed * 2.1, t: 0, dur: .8, radius: e.radius, color: "#ffc45b", angle: Math.atan2(dy, dx), arc: 0, owner: e.id });
+        } else if (def.pattern === "volley") {
+          e.windup = .9;
+          this.warnVolley(e.id, e.x, e.y, Math.atan2(dy, dx), def.minute < 10 ? 3 : 5, .24, 145 + def.minute * 2, e.damage * .65, .9);
+        } else {
+          e.windup = 1;
+          this.warnSlam(e.id, this.px, this.py, def.minute < 10 ? 60 : 80, e.damage, 1);
+        }
+      }
+    }
+    return { x, y };
   }
 
   damagePlayer(raw: number, cause = "The horde") {
@@ -956,7 +1052,7 @@ export class Game {
     e.hp -= final;
     this.recordDamage(effective, final - effective);
     e.hitFlash = 0.12;
-    const kr = 1 - (e.def.knockResist ?? 0);
+    const kr = 1 - (e.miniBossId ? .9 : e.def.knockResist ?? 0);
     e.kx += kbX * kr;
     e.ky += kbY * kr;
     if (opts?.slow) this.applySlow(e, opts.slow, opts.slowF ?? .55);
@@ -968,6 +1064,7 @@ export class Game {
 
   /** Stronger control replaces weaker control; weaker casts never thaw or prolong a freeze. */
   private applySlow(e: Enemy, duration: number, factor: number) {
+    if (e.miniBossId) factor = Math.max(.35, factor);
     if (e.slowT <= 0 || factor < e.slowF) { e.slowF = factor; e.slowT = duration; }
     else if (factor === e.slowF) e.slowT = Math.max(e.slowT, duration);
   }
@@ -975,6 +1072,7 @@ export class Game {
   private killEnemy(e: Enemy, drops: boolean) {
     if (!e.active || this.terminal) return;
     e.active = false;
+    if (e.miniBossId) this.cancelOwnedActions(e.id);
     if (this.charId === "reaper" && this.source === "daggers" && this.traitCooldown <= 0) { this.heal(2); this.traitCooldown = 2; }
     if (this.covenant?.status === "active" && Math.hypot(e.x - this.covenant.x, e.y - this.covenant.y) < 300) this.covenant.progress++;
     this.kills++;
@@ -986,7 +1084,13 @@ export class Game {
     this.dropPickup("gem", e.x + this.rand(-6, 6), e.y + this.rand(-6, 6), xpVal);
     // gold / extras
     const luck = this.stats.luck;
-    if (e.elite) {
+    if (e.miniBossId) {
+      const mini = MINI_BOSSES.find((def) => def.id === e.miniBossId)!;
+      (this.metrics.miniBossesDefeated ??= []).push(mini.id);
+      this.encounterCooldown = ENCOUNTER_SPACING;
+      this.dropPickup("coin", e.x, e.y, mini.gold);
+      audio.sfx("bossDie");
+    } else if (e.elite) {
       this.dropPickup("chest", e.x, e.y, 0);
       for (let i = 0; i < 6; i++) this.dropPickup("coin", e.x + this.rand(-30, 30), e.y + this.rand(-30, 30), 5);
     } else {
@@ -1054,7 +1158,7 @@ export class Game {
         // slam telegraph at player position (generous 1.2s warning)
         const tx = this.px;
         const ty = this.py;
-        this.addFx({ kind: "telegraph", x: tx, y: ty, x2: 0, y2: 0, t: 0, dur: 1.2, radius: 120, color: "#ff9f5b", angle: 0, arc: 0 });
+        this.addFx({ kind: "telegraph", x: tx, y: ty, x2: 0, y2: 0, t: 0, dur: 1.2, radius: 120, color: "#ff9f5b", angle: 0, arc: 0, owner: b.id });
         this.schedule(1.2, "slam", [tx, ty, 120, b.def.damage * 1.2], false, b.id);
       }
       if (b.t2 <= 0) {
@@ -1070,6 +1174,33 @@ export class Game {
         }
         this.addFx({ kind: "summon", x: b.x, y: b.y, x2: 0, y2: 0, t: 0, dur: 0.7, radius: 100, color: b.def.glow, angle: 0, arc: 0 });
       }
+    } else if (b.def.id === "bloodwarden" || b.def.id === "dreadknight") {
+      if (b.t1 <= 0 && b.dashT <= 0 && b.windup <= 0) {
+        b.t1 = b.def.id === "bloodwarden" ? 8 : 7;
+        b.windup = .95;
+        b.dashX = dx / dist * speed * 3; b.dashY = dy / dist * speed * 3;
+        this.addFx({ kind: "telegraph", shape: "line", x: b.x, y: b.y, x2: b.x + b.dashX, y2: b.y + b.dashY, t: 0, dur: .95, radius: b.def.radius, color: b.def.glow, angle: Math.atan2(dy, dx), arc: 0, owner: b.id });
+      }
+      if (b.t2 <= 0) {
+        b.t2 = 10;
+        if (b.def.id === "bloodwarden") this.warnVolley(b.id, b.x, b.y, Math.atan2(dy, dx), 5, .25, 185, b.def.damage * .65, 1);
+        else {
+          // The line is committed at warning time; stepping sideways avoids all three impacts.
+          for (let i = 0; i < 3; i++) this.warnSlam(b.id, this.px + dx / dist * (i - 1) * 125, this.py + dy / dist * (i - 1) * 125, 85, b.def.damage, 1.15 + i * .2);
+        }
+      }
+    } else if (b.def.id === "voidseer") {
+      if (b.t1 <= 0) {
+        b.t1 = 5.5;
+        this.warnVolley(b.id, b.x, b.y, Math.atan2(dy, dx) + Math.PI / 12, 12, TAU, 170, b.def.damage * .55, 1);
+      }
+      if (b.t2 <= 0) {
+        b.t2 = 9;
+        for (let i = 0; i < 3; i++) {
+          const angle = Math.atan2(dy, dx) + i * TAU / 3;
+          this.warnSlam(b.id, this.px + Math.cos(angle) * 100, this.py + Math.sin(angle) * 100, 70, b.def.damage * .8, 1.2);
+        }
+      }
     } else if (b.def.id === "lich") {
       if (b.t1 <= 0) {
         b.t1 = 5 * enrageMul;
@@ -1078,7 +1209,7 @@ export class Game {
         const off = this.random() * TAU;
         for (let i = 0; i < n; i++) {
           const a = off + (i / n) * TAU;
-          this.spawnEnemyBullet(b.x, b.y, Math.cos(a) * 170, Math.sin(a) * 170, b.def.damage * 0.55, "#5dffd8");
+          this.spawnEnemyBullet(b.x, b.y, Math.cos(a) * 170, Math.sin(a) * 170, b.def.damage * 0.55, "#5dffd8", `${b.def.name} projectile`);
         }
         audio.sfx("zap");
       }
@@ -1088,7 +1219,7 @@ export class Game {
         const base = Math.atan2(dy, dx);
         for (let i = -2; i <= 2; i++) {
           const a = base + i * 0.16;
-          this.spawnEnemyBullet(b.x, b.y, Math.cos(a) * 240, Math.sin(a) * 240, b.def.damage * 0.6, "#9fe8d8");
+          this.spawnEnemyBullet(b.x, b.y, Math.cos(a) * 240, Math.sin(a) * 240, b.def.damage * 0.6, "#9fe8d8", `${b.def.name} projectile`);
         }
       }
       if (b.t3 <= 0) {
@@ -1097,7 +1228,7 @@ export class Game {
         const a = this.random() * TAU;
         const x = this.px + Math.cos(a) * this.rand(240, 330);
         const y = this.py + Math.sin(a) * this.rand(240, 330);
-        this.addFx({ kind: "telegraph", shape: "circle", x, y, x2: 0, y2: 0, t: 0, dur: .8, radius: b.def.radius + 35, color: b.def.glow, angle: 0, arc: 0 });
+        this.addFx({ kind: "telegraph", shape: "circle", x, y, x2: 0, y2: 0, t: 0, dur: .8, radius: b.def.radius + 35, color: b.def.glow, angle: 0, arc: 0, owner: b.id });
         this.schedule(.8, "teleport", [x, y, 0, 0], false, b.id);
       }
     } else if (b.def.id === "death") {
@@ -1109,7 +1240,7 @@ export class Game {
           b.spiralN--;
           for (let k = 0; k < 2; k++) {
             const a = b.spiralA + k * Math.PI;
-            this.spawnEnemyBullet(b.x, b.y, Math.cos(a) * 200, Math.sin(a) * 200, b.def.damage * 0.5, "#ff5a5a");
+            this.spawnEnemyBullet(b.x, b.y, Math.cos(a) * 200, Math.sin(a) * 200, b.def.damage * 0.5, "#ff5a5a", `${b.def.name} projectile`);
           }
           b.spiralA += 0.45;
         }
@@ -1125,7 +1256,7 @@ export class Game {
         b.t2 = 10 * enrageMul;
         b.windup = 0.7;
         b.dashX = dx / dist * speed * 3.2; b.dashY = dy / dist * speed * 3.2;
-        this.addFx({ kind: "telegraph", shape: "line", x: b.x, y: b.y, x2: b.x + b.dashX, y2: b.y + b.dashY, t: 0, dur: 0.7, radius: 40, color: "#ff2222", angle: Math.atan2(dy, dx), arc: 0 });
+        this.addFx({ kind: "telegraph", shape: "line", x: b.x, y: b.y, x2: b.x + b.dashX, y2: b.y + b.dashY, t: 0, dur: 0.7, radius: 40, color: "#ff2222", angle: Math.atan2(dy, dx), arc: 0, owner: b.id });
       }
       if (b.t3 <= 0) {
         b.t3 = 13 * enrageMul;
@@ -1147,7 +1278,7 @@ export class Game {
     if (b.hp <= 0) this.killBoss();
   }
 
-  private bossSlam(x: number, y: number, r: number, dmg: number) {
+  private bossSlam(x: number, y: number, r: number, dmg: number, cause = "Colossus slam") {
     if (this.terminal || this.phase !== "playing") return;
     this.addFx({ kind: "ring", x, y, x2: 0, y2: 0, t: 0, dur: 0.5, radius: r * 1.4, color: "#ffb84d", angle: 0, arc: 0 });
     this.burst(x, y, 20, "#d8c9a0", 170);
@@ -1155,7 +1286,7 @@ export class Game {
     audio.sfx("explosion");
     const ddx = this.px - x;
     const ddy = this.py - y;
-    if (Math.hypot(ddx, ddy) < r + 12) this.damagePlayer(dmg, "Colossus slam");
+    if (Math.hypot(ddx, ddy) < r + 12) this.damagePlayer(dmg, cause);
   }
 
   hitBoss(dmg: number, canCrit: boolean) {
@@ -1182,6 +1313,7 @@ export class Game {
     const b = this.boss;
     if (!b) return;
     this.boss = null;
+    this.cancelOwnedActions(b.id);
     this.encounterCooldown = ENCOUNTER_SPACING;
     this.metrics.bossesDefeated.push(b.def.id);
     this.kills++;
@@ -1632,7 +1764,7 @@ export class Game {
     }
   }
 
-  private spawnEnemyBullet(x: number, y: number, vx: number, vy: number, dmg: number, color: string) {
+  private spawnEnemyBullet(x: number, y: number, vx: number, vy: number, dmg: number, color: string, cause = "Hostile projectile") {
     for (const b of this.enemyBullets) {
       if (b.active) continue;
       b.active = true;
@@ -1641,6 +1773,7 @@ export class Game {
       b.vx = vx;
       b.vy = vy;
       b.damage = dmg;
+      b.cause = cause;
       b.life = 6;
       b.color = color;
       b.spin = this.visualRandom() * TAU;
@@ -1662,7 +1795,7 @@ export class Game {
       b.y += b.vy * dt;
       if (segmentHits(oldX, oldY, b.x, b.y, this.px, this.py, b.radius + 13)) {
         b.active = false;
-        this.damagePlayer(b.damage, this.boss ? `${this.boss.def.name} projectile` : "Hostile projectile");
+        this.damagePlayer(b.damage, b.cause ?? "Hostile projectile");
       }
     }
   }
@@ -2110,7 +2243,7 @@ export class Game {
   exportSnapshot() {
     if (!this.runId || this.terminal || this.disposed || this.debug) return null;
     return structuredClone({
-      version: 1 as const, runId: this.runId, charId: this.charId, phase: this.phase,
+      version: 2 as const, runId: this.runId, charId: this.charId, phase: this.phase,
       randomState: this.randomState, entitySerial: this.entitySerial, accumulator: this.accumulator,
       time: this.time, finalPhase: this.finalPhase, px: this.px, py: this.py, camX: this.camX, camY: this.camY,
       hp: this.hp, stats: this.stats, passiveBase: this.passiveBase, level: this.level, xp: this.xp, xpNext: this.xpNext,
@@ -2121,7 +2254,7 @@ export class Game {
       enemyBullets: this.enemyBullets.flatMap((b, slot) => b.active ? [{ ...b, slot }] : []),
       pickups: this.pickups.flatMap((p, slot) => p.active ? [{ ...p, slot }] : []),
       scheduled: this.scheduled, deferredPickups: this.deferredPickups, fx: this.fx,
-      bossesSpawned: [...this.bossesSpawned], eliteSpawned: [...this.eliteSpawned], swarmSpawned: [...this.swarmSpawned],
+      bossesSpawned: [...this.bossesSpawned], miniBossesSpawned: [...this.miniBossesSpawned], eliteSpawned: [...this.eliteSpawned], swarmSpawned: [...this.swarmSpawned],
       spawnTimer: this.spawnTimer, encounterCooldown: this.encounterCooldown, orbAngle: this.orbAngle, pendingChest: this.pendingChest, levelUpsQueued: this.levelUpsQueued,
       currentDraft: this.currentDraft, currentChest: this.currentChest, banished: [...this.banished], draftTools: this.draftTools,
       covenant: this.covenant, traitCharge: this.traitCharge, traitCooldown: this.traitCooldown, traitCasts: this.traitCasts,
@@ -2129,14 +2262,15 @@ export class Game {
     });
   }
   importSnapshot(value: unknown): boolean {
-    if (this.disposed || !validSnapshot(value)) return false;
-    const snapshot = structuredClone(value);
+    const migrated = migrateSnapshot(value);
+    if (this.disposed || !validSnapshot(migrated)) return false;
+    const snapshot = structuredClone(migrated);
     this.stop();
     // Restore only the declared schema: snapshots cannot replace methods, callbacks or platform state.
-    const { version: _version, bullets, enemies, enemyBullets, pickups, bossesSpawned, eliteSpawned, swarmSpawned, banished, ...state } = snapshot;
+    const { version: _version, bullets, enemies, enemyBullets, pickups, bossesSpawned, miniBossesSpawned, eliteSpawned, swarmSpawned, banished, ...state } = snapshot;
     void _version;
     Object.assign(this, state);
-    this.bossesSpawned = new Set(bossesSpawned); this.eliteSpawned = new Set(eliteSpawned); this.swarmSpawned = new Set(swarmSpawned); this.banished = new Set(banished);
+    this.bossesSpawned = new Set(bossesSpawned); this.miniBossesSpawned = new Set(miniBossesSpawned); this.eliteSpawned = new Set(eliteSpawned); this.swarmSpawned = new Set(swarmSpawned); this.banished = new Set(banished);
     this.enemies.forEach((e) => e.active = false); enemies.forEach(({ slot, ...e }) => this.enemies[slot] = { ...e, def: ENEMIES[e.def.id] });
     this.bullets.forEach((b) => b.active = false); bullets.forEach(({ slot, ...b }) => this.bullets[slot] = { ...b, hitIds: new Set(b.hitIds) });
     this.enemyBullets.forEach((b) => b.active = false); enemyBullets.forEach(({ slot, ...b }) => this.enemyBullets[slot] = b);
@@ -2171,7 +2305,8 @@ export class Game {
   }
   private updateCovenant(dt: number) {
     if (!this.cb.onCovenant) return;
-    if (!this.covenant && this.time >= 10 * 60 && this.time < 14 * 60 && !this.boss && this.encounterCooldown <= 0 && this.phase === "playing") {
+    const encounterSoon = [...BOSSES.filter((boss) => !this.bossesSpawned.has(boss.id)), ...MINI_BOSSES.filter((mini) => !this.miniBossesSpawned.has(mini.id))].some((encounter) => encounter.minute * 60 - this.time <= 45 + ENCOUNTER_SPACING);
+    if (!this.covenant && !encounterSoon && !this.enemies.some((e) => e.active && e.miniBossId !== null) && this.time >= 10 * 60 && this.time < 14 * 60 && !this.boss && this.encounterCooldown <= 0 && this.phase === "playing") {
       this.covenant = { status: "offered", x: this.px, y: this.py, remaining: 45, progress: 0, target: 12, reward: null };
       this.setPhase("covenant"); this.cb.onCovenant([]); return;
     }
@@ -2307,7 +2442,7 @@ export class Game {
   quitToMenu() { this.abandonRun(); }
 
   /** Developer-only, isolated QA scenarios. Never accept these controls in production. */
-  debugScenario(options: { minute: number; density: number; fullBuild: boolean; boss?: "none" | "colossus" | "lich" | "death"; phase?: RunPhase; invulnerable: boolean; seed?: number }) {
+  debugScenario(options: { minute: number; density: number; fullBuild: boolean; boss?: "none" | BossDef["id"]; miniBoss?: string; phase?: RunPhase; invulnerable: boolean; seed?: number }) {
     if (!this.debug || process.env.NODE_ENV === "production" || this.terminal) return false;
     this.scheduled = []; this.currentDraft = []; this.currentChest = []; this.pendingChest = this.levelUpsQueued = 0;
     this.time = Math.max(0, Math.min(30, options.minute)) * 60;
@@ -2317,6 +2452,7 @@ export class Game {
     if (options.seed !== undefined && Number.isFinite(options.seed)) this.randomState = options.seed >>> 0 || 1;
     this.qaInvulnerable = options.invulnerable;
     this.finalPhase = this.time >= GAME_DURATION;
+    this.miniBossesSpawned = new Set(MINI_BOSSES.filter((mini) => mini.minute <= options.minute).map((mini) => mini.id));
     this.boss = null; this.bossesSpawned = new Set(BOSSES.filter((b) => b.minute <= options.minute).map((b) => b.id));
     this.enemies.forEach((e) => e.active = false); this.enemyBullets.forEach((b) => b.active = false);
     this.bullets.forEach((b) => b.active = false); this.pickups.forEach((p) => p.active = false);
@@ -2330,7 +2466,10 @@ export class Game {
       const e = this.spawnEnemy(ENEMIES[Object.keys(ENEMIES)[i % Object.keys(ENEMIES).length]], false);
       if (e) { const a = i * 2.399; const radius = 110 + i % 17 * 20; e.x = this.px + Math.cos(a) * radius; e.y = this.py + Math.sin(a) * radius; }
     }
-    if (options.boss && options.boss !== "none") this.spawnBoss(BOSSES.find((b) => b.id === options.boss)!);
+    const requestedBoss = BOSSES.find((boss) => boss.id === options.boss);
+    if (requestedBoss) this.spawnBoss(requestedBoss);
+    const requestedMini = MINI_BOSSES.find((mini) => mini.id === options.miniBoss);
+    if (requestedMini) this.spawnMiniBoss(requestedMini);
     this.setPhase("playing"); this.buildGrid();
     if (options.phase === "levelup") this.gainXp(this.xpNext);
     if (options.phase === "chest" || options.phase === "evolution") this.openChestNow();
@@ -2358,7 +2497,12 @@ export class Game {
   // ------------------------------------------------------------- hud
 
   hudSnapshot(): HudState {
+    const nextEncounter = this.finalPhase ? null : [
+      ...BOSSES.filter((boss) => !this.bossesSpawned.has(boss.id)).map((boss) => ({ name: boss.name, minute: boss.minute, kind: "boss" as const })),
+      ...MINI_BOSSES.filter((mini) => !this.miniBossesSpawned.has(mini.id)).map((mini) => ({ name: mini.name, minute: mini.minute, kind: "miniBoss" as const })),
+    ].sort((a, b) => a.minute - b.minute)[0] ?? null;
     return {
+      nextEncounter,
       time: this.finalPhase ? GAME_DURATION : this.time,
       level: this.level,
       xp: this.xp,
@@ -2432,14 +2576,33 @@ function validUpgradeForBuild(option: UpgradeOption, weapons: WeaponState[], pas
   }
   return false;
 }
+/** Version 1 predates the added encounter schedule. Do not replay missed new fights on reload. */
+function migrateSnapshot(value: unknown): unknown {
+  try {
+    if (!value || typeof value !== "object" || !("version" in value) || value.version !== 1) return value;
+    if (JSON.stringify(value).length > 900_000) return null;
+    const legacy = structuredClone(value) as Record<string, unknown>;
+    if (Object.hasOwn(legacy, "miniBossesSpawned") || typeof legacy.time !== "number" || !Number.isFinite(legacy.time) || !Array.isArray(legacy.enemies) || !Array.isArray(legacy.bossesSpawned) || !legacy.metrics || typeof legacy.metrics !== "object") return null;
+    const historical = MINI_BOSSES.filter((mini) => mini.minute * 60 <= (legacy.time as number)).map((mini) => mini.id);
+    const oldBossIds = new Set(["colossus", "lich", "death"]);
+    const newHistoricalBosses = BOSSES.filter((boss) => !oldBossIds.has(boss.id) && boss.minute * 60 <= (legacy.time as number)).map((boss) => boss.id);
+    legacy.version = 2;
+    legacy.miniBossesSpawned = historical;
+    legacy.bossesSpawned = [...new Set([...legacy.bossesSpawned, ...newHistoricalBosses])];
+    legacy.enemies = legacy.enemies.map((enemy: Record<string, unknown>) => ({ ...enemy, miniBossId: null, attackTimer: 0 }));
+    legacy.metrics = { ...legacy.metrics, miniBossesDefeated: [] };
+    return legacy;
+  } catch { return null; }
+}
+
 function validSnapshot(value: unknown): value is GameSnapshot {
   if (!value || typeof value !== "object") return false;
   const s = value as GameSnapshot;
   try {
-    if (JSON.stringify(s).length > 900_000 || s.version !== 1 || typeof s.runId !== "string" || s.runId.length > 100 || !s.runId || !CHARACTERS.some((c) => c.id === s.charId)) return false;
+    if (JSON.stringify(s).length > 900_000 || s.version !== 2 || typeof s.runId !== "string" || s.runId.length > 100 || !s.runId || !CHARACTERS.some((c) => c.id === s.charId)) return false;
     const own = (catalog: object, id: unknown): id is string => typeof id === "string" && Object.hasOwn(catalog, id);
     const text = (v: unknown, max = 2048) => typeof v === "string" && v.length <= max;
-    const keys = "version runId charId phase randomState entitySerial accumulator time finalPhase px py camX camY hp stats passiveBase level xp xpNext kills runGold damageDealt iframes faceX weapons passives boss enemies bullets enemyBullets pickups scheduled deferredPickups fx bossesSpawned eliteSpawned swarmSpawned spawnTimer encounterCooldown orbAngle pendingChest levelUpsQueued currentDraft currentChest banished draftTools covenant traitCharge traitCooldown traitCasts lastAim source metrics damageCause".split(" ");
+    const keys = "version runId charId phase randomState entitySerial accumulator time finalPhase px py camX camY hp stats passiveBase level xp xpNext kills runGold damageDealt iframes faceX weapons passives boss enemies bullets enemyBullets pickups scheduled deferredPickups fx bossesSpawned miniBossesSpawned eliteSpawned swarmSpawned spawnTimer encounterCooldown orbAngle pendingChest levelUpsQueued currentDraft currentChest banished draftTools covenant traitCharge traitCooldown traitCasts lastAim source metrics damageCause".split(" ");
     if (Object.keys(s).length !== keys.length || Object.keys(s).some((key) => !keys.includes(key))) return false;
     const finiteTree = (v: unknown, depth = 0): boolean => depth <= 15 && (v === null || typeof v === "string" || typeof v === "boolean" || typeof v === "number" && Number.isFinite(v) || typeof v === "object" && Object.values(v).every((x) => finiteTree(x, depth + 1)));
     if (!finiteTree(s) || !["playing", "paused", "levelup", "chest", "evolution", "covenant"].includes(s.phase) || s.hp <= 0 || s.stats.maxHp <= 0 || s.hp > s.stats.maxHp || s.time < 0 || s.time > 86400 || s.level < 1 || s.runGold < 0 || s.randomState < 1) return false;
@@ -2454,28 +2617,29 @@ function validSnapshot(value: unknown): value is GameSnapshot {
     if (!Array.isArray(s.passives) || s.passives.length > MAX_PASSIVES || s.passives.some((p) => !own(PASSIVES, p.id) || !Number.isInteger(p.level) || p.level < 1 || p.level > 5)) return false;
     if (new Set(s.passives.map((p) => p.id)).size !== s.passives.length) return false;
     const entity = (e: { x: number; y: number; active: boolean }) => typeof e.x === "number" && typeof e.y === "number" && e.active === true;
-    if (!Array.isArray(s.enemies) || s.enemies.length > 400 || s.enemies.some((e) => !entity(e) || !own(ENEMIES, e.def?.id) || !Number.isInteger(e.id) || !nonnegativeRecord(e.hitCooldowns) || !numeric(e, "id x y hp maxHp speed damage radius xp hitFlash slowT slowF kx ky orbCd wobble charge faceX chargeX chargeY windup") || e.hp <= 0 || e.radius <= 0 || e.radius > 50)) return false;
+    if (!Array.isArray(s.enemies) || s.enemies.length > 400 || s.enemies.some((e) => !entity(e) || !own(ENEMIES, e.def?.id) || !Number.isInteger(e.id) || !nonnegativeRecord(e.hitCooldowns) || !numeric(e, "id x y hp maxHp speed damage radius xp hitFlash slowT slowF kx ky orbCd wobble charge faceX chargeX chargeY windup attackTimer") || e.hp <= 0 || e.radius <= 0 || e.radius > 50)) return false;
     const ids = s.enemies.map((e) => e.id); if (s.boss) ids.push(s.boss.id);
     if (new Set(ids).size !== ids.length || ids.some((id) => id <= 0 || id > s.entitySerial)) return false;
     if (!Array.isArray(s.bullets) || s.bullets.length > 300 || s.bullets.some((b) => !entity(b) || !["arrow", "orb", "shard", "fireball", "meteor"].includes(b.kind) || !Array.isArray(b.hitIds) || b.hitIds.some((id) => !Number.isInteger(id)) || !own(WEAPONS, b.source) || !numeric(b, "x y vx vy life maxLife damage radius pierce angle tx ty aoe slowDuration"))) return false;
-    if (!Array.isArray(s.enemyBullets) || s.enemyBullets.length > 120 || s.enemyBullets.some((b) => !entity(b) || !numeric(b, "x y vx vy life damage radius spin"))) return false;
+    if (!Array.isArray(s.enemyBullets) || s.enemyBullets.length > 120 || s.enemyBullets.some((b) => !entity(b) || !numeric(b, "x y vx vy life damage radius spin") || b.cause !== undefined && (!text(b.cause, 160) || !b.cause))) return false;
     if (!Array.isArray(s.pickups) || s.pickups.length > 700 || s.pickups.some((p) => !entity(p) || !["gem", "coin", "meat", "magnet", "bomb", "chest"].includes(p.kind) || !numeric(p, "x y value tier vx vy bob"))) return false;
     const slotsValid = (items: { slot: number }[], cap: number) => new Set(items.map((item) => item.slot)).size === items.length && items.every((item) => Number.isInteger(item.slot) && item.slot >= 0 && item.slot < cap);
     if (!slotsValid(s.enemies, 400) || !slotsValid(s.bullets, 300) || !slotsValid(s.enemyBullets, 120) || !slotsValid(s.pickups, 700)) return false;
     if (s.boss && (!BOSSES.some((b) => b.id === s.boss?.def?.id) || !nonnegativeRecord(s.boss.hitCooldowns) || !numeric(s.boss, "id x y hp maxHp hitFlash t1 t2 t3 faceX windup dashT dashX dashY spiralA spiralN spiralT") || s.boss.hp <= 0)) return false;
-    if (!Array.isArray(s.scheduled) || s.scheduled.length > 1000 || s.scheduled.some((a) => a.runId !== s.runId || !["slash", "lightning", "meteor", "slam", "teleport"].includes(a.kind) || !Array.isArray(a.args) || a.args.length !== (a.kind === "slash" ? 3 : 4) || a.args.some((n) => typeof n !== "number") || typeof a.remaining !== "number")) return false;
-    if (![s.currentDraft, s.currentChest, s.deferredPickups, s.fx, s.banished, s.bossesSpawned, s.eliteSpawned, s.swarmSpawned].every(Array.isArray) || !s.draftTools || !s.metrics?.damageByWeapon || !s.metrics.goldBySource) return false;
+    if (!Array.isArray(s.scheduled) || s.scheduled.length > 1000 || s.scheduled.some((a) => a.runId !== s.runId || !["slash", "lightning", "meteor", "slam", "teleport", "volley"].includes(a.kind) || !Array.isArray(a.args) || a.args.length !== (a.kind === "slash" ? 3 : a.kind === "volley" ? 7 : 4) || a.args.some((n) => typeof n !== "number") || typeof a.remaining !== "number" || a.owner !== undefined && (!Number.isInteger(a.owner) || a.owner <= 0 || a.owner > s.entitySerial) || a.kind === "volley" && (a.owner === undefined || !Number.isInteger(a.args[3]) || a.args[3] < 1 || a.args[3] > 24 || a.args[4] < 0 || a.args[4] > TAU || a.args[5] < 0 || a.args[5] > 500 || a.args[6] < 0))) return false;
+    if (![s.currentDraft, s.currentChest, s.deferredPickups, s.fx, s.banished, s.bossesSpawned, s.miniBossesSpawned, s.eliteSpawned, s.swarmSpawned].every(Array.isArray) || !s.draftTools || !s.metrics?.damageByWeapon || !s.metrics.goldBySource) return false;
     if (!numeric(s.draftTools, "rerolls skips banishes") || s.draftTools.rerolls < 0 || s.draftTools.rerolls > 3 || s.draftTools.skips < 0 || s.draftTools.skips > 2 || s.draftTools.banishes < 0 || s.draftTools.banishes > 1) return false;
-    if (!numeric(s.metrics, "overkill damageTaken healing xpCollected") || !nonnegativeRecord(s.metrics.damageByWeapon) || !nonnegativeRecord(s.metrics.goldBySource) || !Array.isArray(s.metrics.bossesDefeated) || !Array.isArray(s.metrics.evolutions)) return false;
+    if (!numeric(s.metrics, "overkill damageTaken healing xpCollected") || !nonnegativeRecord(s.metrics.damageByWeapon) || !nonnegativeRecord(s.metrics.goldBySource) || !Array.isArray(s.metrics.bossesDefeated) || !Array.isArray(s.metrics.evolutions) || !Array.isArray(s.metrics.miniBossesDefeated)) return false;
     if (s.covenant && (!numeric(s.covenant, "x y remaining progress target") || !["offered", "active", "reward", "complete", "declined", "failed"].includes(s.covenant.status) || s.covenant.reward !== null && !COVENANT_REWARDS.some((r) => r.id === s.covenant?.reward))) return false;
     if (s.fx.length > 121 || s.fx.some((f) => !numeric(f, "x y x2 y2 t dur radius angle arc") || !["slash", "ring", "bolt", "explosion", "telegraph", "nova", "summon"].includes(f.kind))) return false;
     if (s.deferredPickups.length > 2000 || s.deferredPickups.some((p) => !numeric(p, "x y value") || !["gem", "coin", "meat", "magnet", "bomb", "chest"].includes(p.kind))) return false;
     if (["levelup", "evolution"].includes(s.phase) && !s.currentDraft.length || s.phase === "chest" && !s.currentChest.length || s.phase === "covenant" && (!s.covenant || !["offered", "reward"].includes(s.covenant.status))) return false;
     if (s.currentChest.length > 6 || s.currentChest.some((r) => !text(r.name) || !text(r.desc) || !text(r.icon, 100) || typeof r.isEvolution !== "boolean")) return false;
-    if (s.bossesSpawned.some((id) => !BOSSES.some((b) => b.id === id)) || s.eliteSpawned.some((minute) => !ELITE_MINUTES.includes(minute)) || s.swarmSpawned.some((minute) => !SWARM_MINUTES.includes(minute)) || s.banished.some((id) => !own(WEAPONS, id) && !own(PASSIVES, id))) return false;
+    if (s.miniBossesSpawned.length > MINI_BOSSES.length || new Set(s.miniBossesSpawned).size !== s.miniBossesSpawned.length || s.miniBossesSpawned.some((id) => !MINI_BOSSES.some((mini) => mini.id === id)) || s.bossesSpawned.some((id) => !BOSSES.some((b) => b.id === id)) || s.eliteSpawned.some((minute) => !ELITE_MINUTES.includes(minute)) || s.swarmSpawned.some((minute) => !SWARM_MINUTES.includes(minute)) || s.banished.some((id) => !own(WEAPONS, id) && !own(PASSIVES, id))) return false;
     if (!own(WEAPONS, s.source) && !["other", "bomb", "revival"].includes(s.source)) return false;
     if (s.enemies.some((e) => typeof e.elite !== "boolean" || typeof e.charging !== "boolean" || e.speed < 0 || e.damage < 0 || e.slowF < 0 || e.slowF > 1) || s.pickups.some((p) => typeof p.attracted !== "boolean" || p.value < 0) || s.bullets.some((b) => typeof b.evolved !== "boolean" || b.damage < 0)) return false;
-    if (s.metrics.bossesDefeated.some((id) => !BOSSES.some((b) => b.id === id)) || s.metrics.evolutions.some((id) => !own(WEAPONS, id))) return false;
+    if (s.enemies.some((e) => e.miniBossId !== null && (!MINI_BOSSES.some((mini) => mini.id === e.miniBossId && mini.enemyId === e.def.id) || e.elite || !s.miniBossesSpawned.includes(e.miniBossId))) || new Set(s.enemies.filter((e) => e.miniBossId).map((e) => e.miniBossId)).size !== s.enemies.filter((e) => e.miniBossId).length) return false;
+    if (s.metrics.miniBossesDefeated!.some((id) => !MINI_BOSSES.some((mini) => mini.id === id)) || s.metrics.bossesDefeated.some((id) => !BOSSES.some((b) => b.id === id)) || s.metrics.evolutions.some((id) => !own(WEAPONS, id))) return false;
     if (s.currentDraft.length > 6 || s.currentDraft.some((o) => {
       if (!o || !["weapon", "passive", "evolution", "gold", "heal"].includes(o.kind) || !text(o.id, 100) || !text(o.name) || !text(o.desc) || !text(o.icon, 100) || !text(o.color, 100) || typeof o.isNew !== "boolean" || !Number.isInteger(o.level) || !Number.isInteger(o.maxLevel)) return true;
       if (o.detail !== undefined && !text(o.detail) || o.partner !== undefined && !text(o.partner) || o.evolutionReady !== undefined && typeof o.evolutionReady !== "boolean") return true;

@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { Game } from "../app/game/engine";
 import { Input } from "../app/game/input";
-import { BASE_STATS, BOSSES, ENEMIES } from "../app/game/data";
+import { BASE_STATS, BOSSES, ENEMIES, MINI_BOSSES } from "../app/game/data";
 import { DEFAULT_SETTINGS } from "../app/game/settings";
 import { combatViewport, offscreenMarkers, renderGame } from "../app/game/render";
 import { enemySprite, enemyFrozenSprite, enemyFlashSprite } from "../app/game/sprites";
@@ -173,5 +173,51 @@ test("enemy hits retain normal or frozen artwork under a restrained flash withou
         assert.equal(JSON.stringify(game.exportSnapshot()), before);
       }
     }
+  } finally { f.cleanup(); }
+});
+
+
+test("mini-boss edge guidance has its own identity and takes priority over lesser threats", () => {
+  const f = fixture(); try {
+    const { game } = f;
+    game.spawnBoss(BOSSES[0]); Object.assign(game.boss!, { x: 5000, y: 0 });
+    const mini = game.spawnMiniBoss(MINI_BOSSES[0])!; Object.assign(mini, { x: -5000, y: 0 });
+    const elite = game.spawnEnemy(ENEMIES.ghoul, true)!; Object.assign(elite, { x: 0, y: 5000 });
+    game.covenant = { status: "active", x: 0, y: -5000, remaining: 25, progress: 6, target: 12, reward: null };
+    const settings = { ...DEFAULT_SETTINGS, onboardingComplete: true };
+    for (const [width, height] of [[320, 568], [844, 390], [1280, 720]]) {
+      const before = JSON.stringify(game.exportSnapshot());
+      const markers = offscreenMarkers(game, width, height, settings);
+      assert.deepEqual(markers.map(m => m.kind), ["boss", "miniBoss", "covenant"]);
+      assert.ok(Math.cos(markers[1].angle) < -.9, "mini-boss marker points toward its own position");
+      assert.equal(JSON.stringify(game.exportSnapshot()), before);
+    }
+    mini.hp = 0;
+    assert.deepEqual(offscreenMarkers(game, 390, 844, settings).map(m => m.kind), ["boss", "covenant", "elite"]);
+  } finally { f.cleanup(); }
+});
+
+test("visible mini-bosses retain readable named health plates across mobile orientations and comfort modes", () => {
+  const f = fixture(); try {
+    const { game } = f;
+    const mini = game.spawnMiniBoss(MINI_BOSSES[0])!;
+    Object.assign(mini, { x: 90, y: 0, hp: mini.maxHp / 2, hitFlash: .15 });
+    const before = JSON.stringify(game.exportSnapshot());
+    for (const [width, height] of [[320, 568], [844, 390], [1280, 720]]) {
+      for (const highContrast of [false, true]) {
+        const commands: Command[] = [];
+        renderGame(game, canvasContext(commands), width, height, { ...DEFAULT_SETTINGS, screenFlash: false, reducedMotion: true, highContrast });
+        const label = commands.find(c => c.name === "fillText" && c.args[0] === MINI_BOSSES[0].name);
+        assert.ok(label, "visible threat is named");
+        assert.ok(Number(label.args[1]) >= 48 && Number(label.args[1]) <= width - 48, "name plate stays within the horizontal viewport");
+        assert.ok(commands.some(c => c.name === "fillRect" && c.args[2] === 43 && c.args[3] === 5), "health fill represents half the 86px track regardless of camera scale");
+        assert.equal(offscreenMarkers(game, width, height, { ...DEFAULT_SETTINGS, onboardingComplete: true }).filter(m => m.kind === "miniBoss").length, 0);
+        assert.equal(JSON.stringify(game.exportSnapshot()), before);
+      }
+    }
+    mini.active = false;
+    const commands: Command[] = [];
+    renderGame(game, canvasContext(commands), 390, 844, DEFAULT_SETTINGS);
+    assert.ok(!commands.some(c => c.name === "fillText" && c.args[0] === MINI_BOSSES[0].name), "defeated mini-bosses leave no stale health plate");
   } finally { f.cleanup(); }
 });
