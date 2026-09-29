@@ -128,7 +128,7 @@ export default function GameRoot() {
       }, onHud: (h) => { setHud(h); if (warningUntil && (gameRef.current?.time ?? 0) >= warningUntil) { setBossWarning(""); warningUntil = 0; } }, onLevelUp: setOptions, onChest: setRewards,
       onRunStart: (runId, hunter) => { renderFault = false; if (qaRef.current) resetQaMetricsRef.current(); setBossWarning(""); warningUntil = 0; lastSnapshotTime = -15; const p = profileRef.current; if (p) persist(beginRun(p, runId, hunter)); },
       onError: (message) => { platform.reportError(); setRunError(message); setPanel("run-error"); input.reset(); audio.setSuspended(true); },
-      onEvolutionChoice: setOptions, onCovenant: setCovenants, onProgress: checkpoint,
+      onEvolutionChoice: (choices) => { setOptions(choices); setHud(game.hudSnapshot()); }, onCovenant: setCovenants, onProgress: checkpoint,
       onRunEnd: (stats) => {
         setResult(stats); setPanel(null); audio.stopMusic();
         const p = profileRef.current;
@@ -338,7 +338,7 @@ export default function GameRoot() {
         <div className="menu-actions"><button className="btn-ghost" onClick={() => setPanel("build")}>Your build & stats</button><button className="btn-ghost" onClick={() => setPanel("settings")}>Settings</button><button className="btn-ghost" onClick={() => setPanel("journal")}>Hunter’s journal</button><button className="btn-danger" onClick={() => setPanel("end-run")}>End this hunt</button></div>
       </Screen>}
       {!panel && (phase === "levelup" || phase === "evolution") && <Screen title={phase === "evolution" ? "Choose an evolution" : "Choose your boon"} eyebrow={phase === "evolution" ? "POWER AWAKENS" : `LEVEL ${hud?.level ?? 1}`}>
-        <p className="section-intro">{phase === "evolution" ? "Choose carefully: you may evolve only one weapon this hunt." : "The night is paused. Shape what happens next."}</p>
+        <p className="section-intro">{phase === "evolution" ? `Choose your next evolution. ${hud?.weapons.filter(w => w.evolved).length ?? 0} / ${hud?.stats.evolutionSlots ?? 1} evolution slots used this hunt.` : "The night is paused. Shape what happens next."}</p>
         <p className="section-intro"><small>Weapons {hud?.weapons.length ?? 0} / 6 · Passives {hud?.passives.length ?? 0} / 6</small></p>
         <div className="choice-grid">{options.map((o, i) => <div className="choice-wrap" key={`${o.id}-${i}`}><button className="choice-card" onClick={() => pick(o)}>
           <span className="card-overline">{o.kind === "evolution" ? "Evolution · max weapon" : <>{o.isNew ? "NEW " : ""}{o.kind} {o.maxLevel > 0 ? `· ${o.isNew ? "Level 1" : `${o.level - 1} → ${o.level}`}` : ""}</>}</span>
@@ -451,10 +451,11 @@ function Toggle({ label, description, checked, onChange }: { label: string; desc
 }
 function Journal({ profile, onBack, onReplayTutorial }: { profile: ProfileSave; onBack: () => void; onReplayTutorial: () => void }) {
   const [tab, setTab] = useState("field");
+  const evolutionSlots = statsWithMeta(profile).evolutionSlots;
   return <Screen title="Hunter’s journal" eyebrow="KNOWLEDGE OUTLASTS THE NIGHT" footer={<button className="btn-gold" onClick={onBack}>Back</button>}>
     <nav className="journal-tabs" aria-label="Journal pages">{[["field", "Field guide"], ["encounters", "Boss schedule"], ["recipes", "Evolutions"], ["records", "Records"]].map(([id, name]) => <button key={id} className={tab === id ? "btn-gold" : "btn-ghost"} aria-pressed={tab === id} onClick={() => setTab(id)}>{name}</button>)}</nav>
     {tab === "field" && <div className="guide-grid"><article className="panel"><h2>Move to survive</h2><p>Use WASD, arrow keys, or drag. Your attacks fire automatically. Sword Wave follows the last direction you moved; other weapons seek targets or attack around you.</p><p>Keep open ground behind you. Circling through a gap is safer than running into an unbroken wall of enemies.</p><button className="btn-ghost" onClick={onReplayTutorial}>Show first-run guidance again</button></article>
-      <article className="panel"><h2>Build with purpose</h2><p>Glowing gems grant experience. Each level offers a choice. Carry up to six weapons and six passives. Max a weapon, hold its paired passive, then claim a treasure chest to evolve it. You may evolve only one weapon per hunt. Later chests still award ordinary upgrades and gold.</p><p>Reroll, skip and banish charges are limited per hunt. An item you banish will not appear again in that hunt’s drafts.</p></article>
+      <article className="panel"><h2>Build with purpose</h2><p>Glowing gems grant experience. Each level offers a choice. Carry up to six weapons and six passives. Max a weapon, hold its paired passive, then claim a treasure chest to evolve it. Start with one evolution slot; the Evolutions Power-Up unlocks up to six. After your slots are filled, chests still award ordinary upgrades and gold.</p><p>Reroll, skip and banish charges are limited per hunt. An item you banish will not appear again in that hunt’s drafts.</p></article>
       <article className="panel"><h2>Read the ground</h2><p>Outlined danger zones warn of incoming attacks. Leave before the countdown closes. Hostile projectiles can hurt you even while you are damaging their source.</p><p>Mini-bosses begin at 01:00. A main boss arrives every five minutes, ending with Death at 30:00. Open the Boss schedule for exact times and attack tells. Defeat Death to win; reaching the timer alone is not victory.</p></article>
       <article className="panel"><h2>Know your rewards</h2><p>Gems give XP. Coins give permanent gold. Food restores health. Magnets gather nearby gems. Bombs damage the horde. Chests grant rewards and eligible evolutions.</p><p>Earned gold is kept when the hunt ends. Spend it on Power-Ups, or refund permanent upgrades to try another direction.</p></article>
     </div>}
@@ -464,7 +465,7 @@ function Journal({ profile, onBack, onReplayTutorial }: { profile: ProfileSave; 
         ...BOSSES.map(b => ({ ...b, kind: "Main boss", tip: BOSS_TIPS[b.id] ?? "Read the warning zones and keep an escape route open." })),
       ].sort((a, b) => a.minute - b.minute).map(b => <li className="panel" key={b.id}><time>{fmtTime(b.minute * 60)}</time><div><p className="card-overline">{b.kind}</p><h2>{b.name}</h2><p className="muted">{b.title}</p><p>{b.tip}</p></div></li>)}</ol>
     </>}
-    {tab === "recipes" && <><p className="section-intro">One evolution per hunt. Choose the weapon that defines your build; the rest can still reach their maximum ordinary rank.</p><div className="recipe-grid">{Object.values(WEAPONS).map(w => <article className="panel recipe" key={w.id}><p className="card-overline">{w.name} · LEVEL {w.maxLevel}</p><h2>{w.evolvedName}</h2><p className="recipe-formula"><span>{w.name}</span><b>+</b><span>{PASSIVES[w.evolvesWith].name}</span><b>+</b><span>Treasure chest</span></p><p>{w.evolvedDesc}</p></article>)}</div></>}
+    {tab === "recipes" && <><p className="section-intro">Your next hunt has {evolutionSlots} evolution {evolutionSlots === 1 ? "slot" : "slots"}. Buy Evolutions in Power-Ups to add one slot per rank, up to six. Each eligible weapon still needs its own treasure chest.</p><div className="recipe-grid">{Object.values(WEAPONS).map(w => <article className="panel recipe" key={w.id}><p className="card-overline">{w.name} · LEVEL {w.maxLevel}</p><h2>{w.evolvedName}</h2><p className="recipe-formula"><span>{w.name}</span><b>+</b><span>{PASSIVES[w.evolvesWith].name}</span><b>+</b><span>Treasure chest</span></p><p>{w.evolvedDesc}</p></article>)}</div></>}
     {tab === "records" && <><div className="result-stats"><Stat label="Best survival" value={fmtTime(profile.bestTime)}/><Stat label="Dawns reclaimed" value={String(profile.wins)}/><Stat label="Hunts completed" value={String(profile.runs)}/><Stat label="Enemies slain" value={gold(profile.totalKills)}/></div>
       <h2 className="subheading">Hunter mastery</h2><div className="guide-grid">{CHARACTERS.map(c => <article className="panel" key={c.id}><h2>{c.name}</h2><p>{profile.mastery[c.id].runs} hunts · {profile.mastery[c.id].wins} victories · best {fmtTime(profile.mastery[c.id].bestTime)}</p><p className="muted">{c.trait}</p></article>)}</div>
       <h2 className="subheading">Milestones · {profile.achievements.length} / {ACHIEVEMENTS.length}</h2><div className="guide-grid">{ACHIEVEMENTS.map(a => <article className="panel" key={a.id}><p className="card-overline">{profile.achievements.includes(a.id) ? "EARNED" : "UNDISCOVERED"}</p><h3>{a.name}</h3><p>{a.description}</p></article>)}</div>
@@ -472,9 +473,10 @@ function Journal({ profile, onBack, onReplayTutorial }: { profile: ProfileSave; 
   </Screen>;
 }
 function BuildView({ hud, onBack }: { hud: HudState; onBack: () => void }) {
-  const evolved = hud.weapons.find(w => w.evolved);
+  const evolved = hud.weapons.filter(w => w.evolved);
+  const evolutionSlotsFull = evolved.length >= hud.stats.evolutionSlots;
   return <Screen title="Your build" eyebrow="THE POWER YOU CARRY" footer={<button className="btn-gold" onClick={onBack}>Back to pause</button>}>
-    <p className="section-intro">{hud.trait}</p><p className="section-intro">Evolution · {evolved ? `1 / 1 — ${evolved.name}` : "0 / 1 — choose one weapon to evolve this hunt"}</p><h2 className="subheading">Weapons · {hud.weapons.length} / 6</h2><div className="build-grid">{hud.weapons.map(w => <article className="panel" key={w.id}><p className="card-overline">{w.evolved ? "EVOLVED" : `LEVEL ${w.level} / ${w.maxLevel}`}</p><h3>{w.name}</h3><p>{w.desc}</p><Rank value={w.level} max={w.maxLevel}/><small>{w.evolved ? "Evolution complete" : evolved ? "Evolution slot used — ordinary ranks remain available" : w.evolutionReady ? "Ready to evolve at your next chest" : `Evolution partner: ${w.partner}`}</small></article>)}</div>
+    <p className="section-intro">{hud.trait}</p><p className="section-intro">Evolutions · {evolved.length} / {hud.stats.evolutionSlots} slots used{evolved.length > 0 ? ` — ${evolved.map(w => w.name).join(", ")}` : " — max a weapon and find its paired passive"}</p><h2 className="subheading">Weapons · {hud.weapons.length} / 6</h2><div className="build-grid">{hud.weapons.map(w => <article className="panel" key={w.id}><p className="card-overline">{w.evolved ? "EVOLVED" : `LEVEL ${w.level} / ${w.maxLevel}`}</p><h3>{w.name}</h3><p>{w.desc}</p><Rank value={w.level} max={w.maxLevel}/><small>{w.evolved ? "Evolution complete" : evolutionSlotsFull ? "All evolution slots used — ordinary ranks remain available" : w.evolutionReady ? "Ready to evolve at your next chest" : `Evolution partner: ${w.partner}`}</small></article>)}</div>
     <h2 className="subheading">Passives · {hud.passives.length} / 6</h2><div className="build-grid">{hud.passives.map(p => <article className="panel" key={p.id}><h3>{p.name}</h3><p>{p.desc}</p><Rank value={p.level} max={p.maxLevel}/></article>)}</div>
     <h2 className="subheading">Effective stats</h2><div className="result-stats"><Stat label="Damage" value={`${Math.round(hud.stats.might * 100)}%`}/><Stat label="Attack area" value={`${Math.round(hud.stats.area * 100)}%`}/><Stat label="Cooldown" value={`${Math.round(hud.stats.cooldown * 100)}%`}/><Stat label="Movement" value={`${Math.round(hud.stats.moveSpeed * 100)}%`}/><Stat label="Critical chance" value={`${Math.round(hud.stats.critChance * 100)}%`}/><Stat label="Armor" value={String(hud.stats.armor)}/><Stat label="Regeneration" value={`${hud.stats.regen.toFixed(1)} HP/s`}/><Stat label="Revives left" value={String(hud.stats.revives)}/></div>
   </Screen>;
@@ -547,6 +549,7 @@ function upgradeBenefit(id: string, rank: number) {
     magnetism: `${Math.round(stats.magnet)} pickup range`, fortune: `${Math.round((stats.luck - 1) * 100)}% bonus luck`,
     greed: `${Math.round((stats.goldGain - 1) * 100)}% bonus gold`, growth: `${Math.round((stats.xpGain - 1) * 100)}% bonus XP`,
     armor: `${stats.armor} armor`, revival: `${stats.revives} ${stats.revives === 1 ? "revive" : "revives"}`,
+    evolutions: `${stats.evolutionSlots} evolution ${stats.evolutionSlots === 1 ? "slot" : "slots"}`,
   };
   return values[id] ?? `Rank ${rank}`;
 }

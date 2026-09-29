@@ -71,7 +71,7 @@ test("older multi-evolution hunts keep their first evolution, XP fraction, and e
   assert.equal(restored.game.xpNext, xpForLevel(20)); assert.equal(restored.game.xp / restored.game.xpNext, .5);
   assert.deepEqual(restored.game.metrics.evolutions, ["orb", "fire"]);
   assert.equal(restored.game.covenant!.target, 60); assert.equal(restored.game.covenant!.progress, 30); assert.equal(restored.game.covenant!.remaining, 25);
-  assert.equal(restored.game.exportSnapshot()!.version, 3);
+  assert.equal(restored.game.exportSnapshot()!.version, 4);
 });
 
 test("restoring a pending second evolution preserves the chest as a normal reward", () => {

@@ -2,7 +2,27 @@
 
 Prepared September 27, 2026. Execution authorized September 28, 2026. This is now the living design, implementation and verification record. Baseline audit observations below describe the pre-upgrade source; use the execution ledger for current status.
 
-Reading guide: the 0.4.0 playtest response below is the latest candidate record. The 0.3.0 boss expansion, 0.2.1 follow-up and September 28 ledger are historical; the latter maps every original section and issue to its implementation or explicit deferral. Sections 1–22 preserve the original audit, design hypotheses and proposed roadmap. Their words “current,” “proposed” and “next” refer to the September 27 baseline. Use the latest audit and [release checklist](docs/release-checklist.md) for work still required.
+Reading guide: the 0.5.0 Evolutions update below is the latest candidate record. The 0.4.0 playtest response, 0.3.0 boss expansion, 0.2.1 follow-up and September 28 ledger are historical; the latter maps every original section and issue to its implementation or explicit deferral. Sections 1–22 preserve the original audit, design hypotheses and proposed roadmap. Their words “current,” “proposed” and “next” refer to the September 27 baseline. Use the latest audit and [release checklist](docs/release-checklist.md) for work still required.
+
+## Evolutions shop update — 0.5.0, September 29, 2026
+
+The permanent shop now unlocks additional evolution capacity. A hunter starts with **one evolution slot**; each of five Evolutions ranks adds one slot, reaching **six slots at rank 5**. Buying capacity does not evolve a weapon: the maximum weapon rank, matching passive and chest requirements still apply.
+
+| Shop rank | Evolution slots per new hunt | Price for this rank |
+| --- | ---: | ---: |
+| 0 | 1 | — |
+| 1 | 2 | 1,000 gold |
+| 2 | 3 | 2,000 gold |
+| 3 | 4 | 4,000 gold |
+| 4 | 5 | 8,000 gold |
+| 5 | 6 | 16,000 gold |
+
+- Purchases persist with their paid prices; refunds outside an unfinished hunt return the exact recorded spend and restore one slot. All five ranks cost 31,000 gold in total.
+- Capacity is captured when a hunt starts. Later purchases apply to the next hunt; resuming an existing hunt keeps its captured capacity. HUD, recipes and chest choices use that capacity.
+- Profile schema remains 2; engine checkpoints advance to version 4. Version-3 hunts gain the legacy default of one slot while retaining HP, XP and pending attacks. Version-1/2 hunts retain the previous compatibility migration before receiving one slot. Older profiles without the new rank start at rank 0.
+- The 0.4.0 combat, XP, enemy, boss and ritual changes remain. Its one-evolution rule is superseded by purchased capacity; its historical measurements are unchanged.
+
+Verification details and candidate artifacts are tracked in [the Evolutions shop audit](docs/evolutions-shop-0.5.0.md). Human balance with higher evolution capacity, physical-phone checks and official YouTube validation remain release gates. Follow [save compatibility guidance](docs/save-policy.md) before any rollback; older shop catalogs must preserve the new paid ranks. Nothing has been deployed or submitted.
 
 ## Playtest response — 0.4.0, September 29, 2026
 

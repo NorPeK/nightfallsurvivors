@@ -477,6 +477,7 @@ export const META_UPGRADES: MetaUpgradeDef[] = [
   { id: "growth", name: "Growth", icon: "📈", desc: "+5% XP gained per rank", maxLevel: 5, baseCost: 160, costGrowth: 1.9, apply: (s, l) => { s.xpGain *= 1 + 0.05 * l; } },
   { id: "armor", name: "Armor", icon: "🛡️", desc: "+1 armor per rank", maxLevel: 3, baseCost: 200, costGrowth: 2.2, apply: (s, l) => { s.armor += l; } },
   { id: "revival", name: "Revival", icon: "🕊️", desc: "+1 revive per rank", maxLevel: 2, baseCost: 600, costGrowth: 3.0, apply: (s, l) => { s.revives += l; } },
+  { id: "evolutions", name: "Evolutions", icon: "✨", desc: "+1 evolution slot per rank. Start with 1; unlock up to 6 per hunt.", maxLevel: 5, baseCost: 1000, costGrowth: 2, apply: (s, l) => { s.evolutionSlots = 1 + l; } },
 ];
 
 export function metaUpgradeCost(def: MetaUpgradeDef, currentLevel: number): number {
@@ -499,6 +500,7 @@ export const BASE_STATS: PlayerStats = {
   xpGain: 1,
   goldGain: 1,
   revives: 0,
+  evolutionSlots: 1,
 };
 
 export const GAME_DURATION = 30 * 60; // 30 minutes

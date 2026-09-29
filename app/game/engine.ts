@@ -519,7 +519,7 @@ export class Game {
   abandonRun() { if (this.runId && !this.terminal) this.endRun(false, true); }
   private schedule(delay: number, kind: ScheduledAction["kind"], args: number[], evolved = false, owner?: number) {
     if (this.terminal || this.disposed) return;
-    this.scheduled.push({ remaining: delay, runId: this.runId, owner, kind, args, evolved });
+    this.scheduled.push({ remaining: delay, runId: this.runId, ...(owner === undefined ? {} : { owner }), kind, args, evolved });
   }
   private updateScheduled(dt: number) {
     const pending = this.scheduled; this.scheduled = [];
@@ -2090,7 +2090,7 @@ export class Game {
     return picks.map((option) => {
       if (option.kind !== "weapon") return option;
       const def = WEAPONS[option.id];
-      return { ...option, detail: weaponUpgradeDetail(def.id, option.level), partner: PASSIVES[def.evolvesWith].name, evolutionReady: !this.weapons.some((weapon) => weapon.evolved) && option.level === def.maxLevel && this.passives.some((p) => p.id === def.evolvesWith) };
+      return { ...option, detail: weaponUpgradeDetail(def.id, option.level), partner: PASSIVES[def.evolvesWith].name, evolutionReady: hasEvolutionSlot(this.weapons, this.stats.evolutionSlots) && option.level === def.maxLevel && this.passives.some((p) => p.id === def.evolvesWith) };
     });
   }
   rerollDraft() {
@@ -2111,7 +2111,7 @@ export class Game {
   applyUpgrade(opt: UpgradeOption) {
     if (this.phase !== "levelup" || this.terminal || this.suspended || !opt) return;
     const offered = this.currentDraft.find((o) => o.id === opt.id && o.kind === opt.kind && o.level === opt.level);
-    if (!offered || !validUpgradeForBuild(offered, this.weapons, this.passives, this.banished)) return;
+    if (!offered || !validUpgradeForBuild(offered, this.weapons, this.passives, this.banished, this.stats.evolutionSlots)) return;
     opt = offered;
     audio.sfx("click");
     switch (opt.kind) {
@@ -2199,7 +2199,7 @@ export class Game {
   /** Opens the chest immediately, regardless of current modal phase. */
   private openChestNow(chosenEvolution?: WeaponId) {
     if (this.terminal) return;
-    const choices = this.weapons.some((w) => w.evolved) ? [] : this.weapons.filter((w) => !w.evolved && w.level === WEAPONS[w.id].maxLevel && this.passives.some((p) => p.id === WEAPONS[w.id].evolvesWith));
+    const choices = !hasEvolutionSlot(this.weapons, this.stats.evolutionSlots) ? [] : this.weapons.filter((w) => !w.evolved && w.level === WEAPONS[w.id].maxLevel && this.passives.some((p) => p.id === WEAPONS[w.id].evolvesWith));
     if (choices.length > 1 && !chosenEvolution && this.cb.onEvolutionChoice) {
       this.setPhase("evolution");
       this.currentDraft = choices.map((w) => ({ kind: "evolution", id: w.id, name: WEAPONS[w.id].evolvedName, icon: WEAPONS[w.id].evolvedIcon, color: WEAPONS[w.id].color, level: w.level, maxLevel: w.level, isNew: true, desc: WEAPONS[w.id].evolvedDesc }));
@@ -2207,7 +2207,7 @@ export class Game {
     }
     const rewards: ChestReward[] = [];
     // evolution check (VS rule: max-level weapon + its paired passive)
-    const evolvable = this.weapons.some((w) => w.evolved) ? undefined : this.weapons.find(
+    const evolvable = !hasEvolutionSlot(this.weapons, this.stats.evolutionSlots) ? undefined : this.weapons.find(
       (w) => (!chosenEvolution || w.id === chosenEvolution) && !w.evolved && w.level >= WEAPONS[w.id].maxLevel && this.passives.some((p) => p.id === WEAPONS[w.id].evolvesWith),
     );
     if (evolvable) {
@@ -2254,7 +2254,7 @@ export class Game {
   chooseEvolution(id: string) {
     if (this.phase !== "evolution" || this.terminal || this.suspended) return false;
     const offered = this.currentDraft.find((o) => o.kind === "evolution" && o.id === id);
-    if (!offered || !validUpgradeForBuild(offered, this.weapons, this.passives, this.banished)) return false;
+    if (!offered || !validUpgradeForBuild(offered, this.weapons, this.passives, this.banished, this.stats.evolutionSlots)) return false;
     this.currentDraft = []; this.openChestNow(id as WeaponId); return true;
   }
   ackChest() {
@@ -2280,7 +2280,7 @@ export class Game {
   exportSnapshot() {
     if (!this.runId || this.terminal || this.disposed || this.debug) return null;
     return structuredClone({
-      version: 3 as const, runId: this.runId, charId: this.charId, phase: this.phase,
+      version: 4 as const, runId: this.runId, charId: this.charId, phase: this.phase,
       randomState: this.randomState, entitySerial: this.entitySerial, accumulator: this.accumulator,
       time: this.time, finalPhase: this.finalPhase, px: this.px, py: this.py, camX: this.camX, camY: this.camY,
       hp: this.hp, stats: this.stats, passiveBase: this.passiveBase, level: this.level, xp: this.xp, xpNext: this.xpNext,
@@ -2583,7 +2583,7 @@ export class Game {
       stats: { ...this.stats }, draftTools: { ...this.draftTools }, runId: this.runId,
       finaleTime: Math.max(0, this.time - GAME_DURATION), trait: CHARACTERS.find((c) => c.id === this.charId)?.trait ?? "", covenant: this.covenant ? { ...this.covenant } : null,
       weapons: this.weapons.map((w) => ({
-        id: w.id, name: w.evolved ? WEAPONS[w.id].evolvedName : WEAPONS[w.id].name, desc: w.evolved ? WEAPONS[w.id].evolvedDesc : weaponUpgradeDetail(w.id, w.level), partner: PASSIVES[WEAPONS[w.id].evolvesWith].name, evolutionReady: !this.weapons.some((owned) => owned.evolved) && !w.evolved && w.level === WEAPONS[w.id].maxLevel && this.passives.some((p) => p.id === WEAPONS[w.id].evolvesWith),
+        id: w.id, name: w.evolved ? WEAPONS[w.id].evolvedName : WEAPONS[w.id].name, desc: w.evolved ? WEAPONS[w.id].evolvedDesc : weaponUpgradeDetail(w.id, w.level), partner: PASSIVES[WEAPONS[w.id].evolvesWith].name, evolutionReady: hasEvolutionSlot(this.weapons, this.stats.evolutionSlots) && !w.evolved && w.level === WEAPONS[w.id].maxLevel && this.passives.some((p) => p.id === WEAPONS[w.id].evolvesWith),
         icon: w.evolved ? WEAPONS[w.id].evolvedIcon : WEAPONS[w.id].icon,
         level: w.level,
         maxLevel: WEAPONS[w.id].maxLevel,
@@ -2628,13 +2628,16 @@ function segmentHits(ax: number, ay: number, bx: number, by: number, x: number, 
 }
 
 export type GameSnapshot = NonNullable<ReturnType<Game["exportSnapshot"]>>;
-function validUpgradeForBuild(option: UpgradeOption, weapons: WeaponState[], passives: PassiveState[], banished: Set<string>): boolean {
+function hasEvolutionSlot(weapons: WeaponState[], capacity: number) {
+  return weapons.filter((weapon) => weapon.evolved).length < capacity;
+}
+function validUpgradeForBuild(option: UpgradeOption, weapons: WeaponState[], passives: PassiveState[], banished: Set<string>, evolutionSlots: number): boolean {
   if (option.kind === "gold" || option.kind === "heal") return option.id === option.kind && option.level === 0 && option.maxLevel === 0 && !option.isNew;
   if (option.kind === "weapon" || option.kind === "evolution") {
     if (!Object.hasOwn(WEAPONS, option.id)) return false;
     const def = WEAPONS[option.id], owned = weapons.find((w) => w.id === option.id);
     if (option.maxLevel !== def.maxLevel) return false;
-    if (option.kind === "evolution") return !weapons.some((weapon) => weapon.evolved) && !!owned && !owned.evolved && owned.level === def.maxLevel && option.level === def.maxLevel && option.isNew && passives.some((p) => p.id === def.evolvesWith);
+    if (option.kind === "evolution") return hasEvolutionSlot(weapons, evolutionSlots) && !!owned && !owned.evolved && owned.level === def.maxLevel && option.level === def.maxLevel && option.isNew && passives.some((p) => p.id === def.evolvesWith);
     if (banished.has(option.id)) return false;
     return owned ? !option.isNew && !owned.evolved && owned.level < def.maxLevel && option.level === owned.level + 1 : option.isNew && option.level === 1 && weapons.length < MAX_WEAPONS;
   }
@@ -2648,9 +2651,14 @@ function validUpgradeForBuild(option: UpgradeOption, weapons: WeaponState[], pas
 /** Older hunts retain earned progression while adopting the current encounter and evolution rules. */
 function migrateSnapshot(value: unknown): unknown {
   try {
-    if (!value || typeof value !== "object" || !("version" in value) || ![1, 2].includes(value.version as number)) return value;
+    if (!value || typeof value !== "object" || !("version" in value) || ![1, 2, 3].includes(value.version as number)) return value;
     if (JSON.stringify(value).length > 900_000) return null;
     const legacy = structuredClone(value) as Record<string, unknown>;
+    // Slots belong to the run's starting loadout. Older hunts always began with one.
+    if (!legacy.stats || typeof legacy.stats !== "object" || Array.isArray(legacy.stats) || !legacy.passiveBase || typeof legacy.passiveBase !== "object" || Array.isArray(legacy.passiveBase)) return null;
+    legacy.stats = { ...legacy.stats, evolutionSlots: 1 };
+    legacy.passiveBase = { ...legacy.passiveBase, evolutionSlots: 1 };
+    if (legacy.version === 3) { legacy.version = 4; return legacy; }
     if (typeof legacy.time !== "number" || !Number.isFinite(legacy.time) || !Array.isArray(legacy.enemies) || !Array.isArray(legacy.bossesSpawned) || !legacy.metrics || typeof legacy.metrics !== "object") return null;
     if (legacy.version === 1) {
       if (Object.hasOwn(legacy, "miniBossesSpawned")) return null;
@@ -2708,7 +2716,7 @@ function migrateSnapshot(value: unknown): unknown {
         covenant.progress = Math.min(60, Math.floor(covenant.progress / covenant.target * 60)); covenant.target = 60;
       }
     }
-    legacy.version = 3;
+    legacy.version = 4;
     return legacy;
   } catch { return null; }
 }
@@ -2717,7 +2725,7 @@ function validSnapshot(value: unknown): value is GameSnapshot {
   if (!value || typeof value !== "object") return false;
   const s = value as GameSnapshot;
   try {
-    if (JSON.stringify(s).length > 900_000 || s.version !== 3 || typeof s.runId !== "string" || s.runId.length > 100 || !s.runId || !CHARACTERS.some((c) => c.id === s.charId)) return false;
+    if (JSON.stringify(s).length > 900_000 || s.version !== 4 || typeof s.runId !== "string" || s.runId.length > 100 || !s.runId || !CHARACTERS.some((c) => c.id === s.charId)) return false;
     const own = (catalog: object, id: unknown): id is string => typeof id === "string" && Object.hasOwn(catalog, id);
     const text = (v: unknown, max = 2048) => typeof v === "string" && v.length <= max;
     const keys = "version runId charId phase randomState entitySerial accumulator time finalPhase px py camX camY hp stats passiveBase level xp xpNext kills runGold damageDealt iframes faceX weapons passives boss enemies bullets enemyBullets pickups scheduled deferredPickups fx bossesSpawned miniBossesSpawned eliteSpawned swarmSpawned spawnTimer encounterCooldown orbAngle pendingChest levelUpsQueued currentDraft currentChest banished draftTools covenant traitCharge traitCooldown traitCasts lastAim source metrics damageCause".split(" ");
@@ -2729,9 +2737,9 @@ function validSnapshot(value: unknown): value is GameSnapshot {
     if (!numeric(s, "randomState entitySerial accumulator time px py camX camY hp level xp xpNext kills runGold damageDealt iframes faceX spawnTimer encounterCooldown orbAngle pendingChest levelUpsQueued traitCharge traitCooldown traitCasts lastAim") || typeof s.finalPhase !== "boolean" || typeof s.source !== "string" || typeof s.damageCause !== "string") return false;
     if (!Number.isInteger(s.entitySerial) || !Number.isInteger(s.randomState) || s.randomState > 0xffffffff || s.entitySerial < 0 || s.accumulator < 0 || s.accumulator > .25 || s.encounterCooldown < 0 || s.encounterCooldown > ENCOUNTER_SPACING || s.pendingChest < 0 || s.levelUpsQueued < 0 || !Number.isInteger(s.level) || s.xp < 0 || s.xpNext <= 0 || s.xp >= s.xpNext) return false;
     const validStats = (stats: PlayerStats | null) => stats && Object.keys(BASE_SNAPSHOT_STATS).every((key) => typeof stats[key as keyof PlayerStats] === "number" && Number.isFinite(stats[key as keyof PlayerStats]) && stats[key as keyof PlayerStats] >= 0);
-    if (!validStats(s.stats) || !validStats(s.passiveBase)) return false;
+    if (!validStats(s.stats) || !validStats(s.passiveBase) || !Number.isInteger(s.stats.evolutionSlots) || s.stats.evolutionSlots < 1 || s.stats.evolutionSlots > MAX_WEAPONS || s.stats.evolutionSlots !== s.passiveBase?.evolutionSlots) return false;
     if (!Array.isArray(s.weapons) || s.weapons.length > MAX_WEAPONS || s.weapons.some((w) => !own(WEAPONS, w.id) || !Number.isInteger(w.level) || w.level < 1 || w.level > 8 || typeof w.evolved !== "boolean" || typeof w.timer !== "number" || typeof w.alt !== "number")) return false;
-    if (new Set(s.weapons.map((w) => w.id)).size !== s.weapons.length || s.weapons.filter((w) => w.evolved).length > 1 || s.weapons.some((w) => w.evolved && w.level !== 8)) return false;
+    if (new Set(s.weapons.map((w) => w.id)).size !== s.weapons.length || s.weapons.filter((w) => w.evolved).length > s.stats.evolutionSlots || s.weapons.some((w) => w.evolved && w.level !== 8)) return false;
     if (!Array.isArray(s.passives) || s.passives.length > MAX_PASSIVES || s.passives.some((p) => !own(PASSIVES, p.id) || !Number.isInteger(p.level) || p.level < 1 || p.level > 5)) return false;
     if (new Set(s.passives.map((p) => p.id)).size !== s.passives.length) return false;
     const entity = (e: { x: number; y: number; active: boolean }) => typeof e.x === "number" && typeof e.y === "number" && e.active === true;
@@ -2767,8 +2775,8 @@ function validSnapshot(value: unknown): value is GameSnapshot {
     })) return false;
     if (s.phase === "evolution" && s.currentDraft.some((o) => o.kind !== "evolution" || o.level !== 8) || s.phase === "levelup" && s.currentDraft.some((o) => o.kind === "evolution")) return false;
     const banished = new Set(s.banished);
-    if (new Set(s.currentDraft.map((o) => `${o.kind}:${o.id}`)).size !== s.currentDraft.length || s.currentDraft.some((o) => !validUpgradeForBuild(o, s.weapons, s.passives, banished))) return false;
+    if (new Set(s.currentDraft.map((o) => `${o.kind}:${o.id}`)).size !== s.currentDraft.length || s.currentDraft.some((o) => !validUpgradeForBuild(o, s.weapons, s.passives, banished, s.stats.evolutionSlots))) return false;
     return true;
   } catch { return false; }
 }
-const BASE_SNAPSHOT_STATS: PlayerStats = { maxHp: 100, regen: 0, might: 1, area: 1, projSpeed: 1, cooldown: 1, moveSpeed: 1, magnet: 95, luck: 1, critChance: .05, critDamage: 1.6, armor: 0, xpGain: 1, goldGain: 1, revives: 0 };
+const BASE_SNAPSHOT_STATS: PlayerStats = { maxHp: 100, regen: 0, might: 1, area: 1, projSpeed: 1, cooldown: 1, moveSpeed: 1, magnet: 95, luck: 1, critChance: .05, critDamage: 1.6, armor: 0, xpGain: 1, goldGain: 1, revives: 0, evolutionSlots: 1 };

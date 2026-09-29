@@ -303,7 +303,7 @@ export function clearRunSnapshot(profile: ProfileSave): ProfileSave { return pro
 export function statsWithMeta(save: MetaSave): PlayerStats {
   const stats: PlayerStats = { ...BASE_STATS };
   for (const def of META_UPGRADES) {
-    const rank = save.upgrades?.[def.id];
+    const rank = save.upgrades && Object.hasOwn(save.upgrades, def.id) ? save.upgrades[def.id] : undefined;
     const level = typeof rank === "number" && Number.isFinite(rank) ? Math.max(0, Math.min(def.maxLevel, Math.floor(rank))) : 0;
     if (level > 0) def.apply(stats, level);
   }

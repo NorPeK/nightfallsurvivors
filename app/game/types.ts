@@ -142,6 +142,7 @@ export interface PlayerStats {
   xpGain: number; // multiplier
   goldGain: number; // multiplier
   revives: number;
+  evolutionSlots: number; // 1 by default; permanent Evolutions ranks unlock up to 6
 }
 
 export interface MetaUpgradeDef {

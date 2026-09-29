@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.5.0 — permanent Evolutions slots, September 29, 2026
+
+The shop can now expand evolution capacity from one to six per hunt. See [the feature and verification record](docs/evolutions-shop-0.5.0.md).
+
+- Added five permanent Evolutions ranks, each unlocking one additional slot. Rank prices are 1,000, 2,000, 4,000, 8,000 and 16,000 gold; purchases persist and refunds use the exact recorded spend.
+- Captured evolution capacity at hunt start. Later shop purchases apply to the next hunt, while a resumed hunt retains its original capacity. Weapon rank, passive partner and chest requirements still apply.
+- Updated chest eligibility, evolution choices, recipes and capacity displays for the purchased limit. The 0.4.0 combat and progression changes remain.
+- Added engine-snapshot-v4 compatibility: version-3 hunts receive one slot without changing HP, XP or pending attacks; older runs retain their previous migration. Existing profiles without an Evolutions rank default to one slot.
+
+Profile schema stays 2. Older builds must preserve Evolutions ranks and paid costs before writing these profiles; see [save compatibility and rollback](docs/save-policy.md). Local candidate only; no deployment or certification is claimed.
+
 ## 0.4.0 — playtest difficulty pass, September 29, 2026
 
 Implements the owner's stationary-play, oversized-evolution and early-full-build feedback. See [the difficulty audit](docs/difficulty-update-0.4.0.md) for measurements and limits.
