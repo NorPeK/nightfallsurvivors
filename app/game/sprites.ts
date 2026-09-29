@@ -331,6 +331,104 @@ export function enemySprite(def: EnemyDef, elite: boolean): Sprite {
         eyes(c, 0, -R * 0.15, R * 0.24, R * 0.13, "#ff2d78");
         break;
       }
+      case "lancer": {
+        // Narrow teal armor and a long ivory lance make its charge readable.
+        c.fillStyle = color;
+        c.shadowColor = glow;
+        c.shadowBlur = 9;
+        c.beginPath();
+        c.moveTo(0, -R * .95);
+        c.lineTo(R * .62, -R * .25);
+        c.lineTo(R * .5, R * .8);
+        c.lineTo(0, R * 1.1);
+        c.lineTo(-R * .5, R * .8);
+        c.lineTo(-R * .62, -R * .25);
+        c.closePath();
+        c.fill();
+        c.strokeStyle = "#d7f6f4";
+        c.lineWidth = R * .11;
+        c.beginPath();
+        c.moveTo(R * .85, R * .85);
+        c.lineTo(R * .85, -R * 1.05);
+        c.stroke();
+        c.fillStyle = "#e1eac5";
+        c.beginPath();
+        c.moveTo(R * .85, -R * 1.5);
+        c.lineTo(R * 1.07, -R * .98);
+        c.lineTo(R * .63, -R * .98);
+        c.closePath();
+        c.fill();
+        c.fillStyle = "#132e36";
+        c.fillRect(-R * .33, -R * .42, R * .66, R * .18);
+        eyes(c, 0, -R * .33, R * .17, R * .065, "#adffff");
+        break;
+      }
+      case "banshee": {
+        // Raised arms and a hollow mouth distinguish the scream caster from a wraith.
+        c.fillStyle = color;
+        c.shadowColor = glow;
+        c.shadowBlur = 12;
+        c.beginPath();
+        c.moveTo(0, -R * .9);
+        c.quadraticCurveTo(R * .6, -R * .8, R * .62, 0);
+        c.lineTo(R * 1.15, -R * .65);
+        c.lineTo(R * .93, R * .45);
+        c.lineTo(R * .48, R * .2);
+        c.lineTo(R * .67, R * 1.1);
+        c.lineTo(0, R * .7);
+        c.lineTo(-R * .67, R * 1.1);
+        c.lineTo(-R * .48, R * .2);
+        c.lineTo(-R * .93, R * .45);
+        c.lineTo(-R * 1.15, -R * .65);
+        c.lineTo(-R * .62, 0);
+        c.quadraticCurveTo(-R * .6, -R * .8, 0, -R * .9);
+        c.fill();
+        c.fillStyle = "#431329";
+        c.beginPath();
+        c.ellipse(0, -R * .06, R * .2, R * .32, 0, 0, Math.PI * 2);
+        c.fill();
+        eyes(c, 0, -R * .48, R * .2, R * .1, "#fff2cc");
+        break;
+      }
+      case "scarab": {
+        // Six hooked legs, two shell plates and a gold horn form a broad armored silhouette.
+        c.strokeStyle = color;
+        c.lineWidth = R * .13;
+        c.lineCap = "round";
+        c.shadowColor = glow;
+        c.shadowBlur = 8;
+        for (const side of [-1, 1]) {
+          for (let leg = 0; leg < 3; leg++) {
+            const y = (-.45 + leg * .45) * R;
+            c.beginPath();
+            c.moveTo(side * R * .5, y);
+            c.lineTo(side * R * 1.12, y - R * .15);
+            c.lineTo(side * R * 1.22, y + R * .2);
+            c.stroke();
+          }
+        }
+        c.fillStyle = color;
+        c.beginPath();
+        c.ellipse(0, R * .1, R * .76, R * .94, 0, 0, Math.PI * 2);
+        c.fill();
+        c.strokeStyle = "#594313";
+        c.lineWidth = R * .1;
+        c.beginPath();
+        c.moveTo(0, -R * .58);
+        c.lineTo(0, R * 1.01);
+        c.moveTo(-R * .65, -R * .28);
+        c.lineTo(R * .65, -R * .28);
+        c.stroke();
+        glowCircle(c, 0, -R * .72, R * .33, color, glow, 6);
+        c.fillStyle = "#f8e8a4";
+        c.beginPath();
+        c.moveTo(-R * .14, -R * .88);
+        c.lineTo(0, -R * 1.42);
+        c.lineTo(R * .14, -R * .88);
+        c.fill();
+        eyes(c, 0, -R * .76, R * .15, R * .085, "#f0ff8f");
+        break;
+      }
     }
     c.restore();
     if (elite) {

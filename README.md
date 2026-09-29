@@ -2,7 +2,7 @@
 
 A gothic, single-player horde-survival game built with TypeScript, Canvas 2D, React, and a statically exported Next.js website. Fight twelve mini-bosses throughout the night and a main boss every five minutes. Survive thirty minutes, then defeat Death to reclaim the dawn. The final fight may extend past thirty minutes.
 
-The upgrade is tracked in [plan.md](plan.md). See the [boss update and verification](docs/boss-update-0.3.0.md), [release checks](docs/release-checklist.md), [known limitations](docs/known-issues.md) and [changelog](CHANGELOG.md). A locally built Playables package is a test candidate, not YouTube certification.
+The upgrade is tracked in [plan.md](plan.md). See the [difficulty update and verification](docs/difficulty-update-0.4.0.md), [release checks](docs/release-checklist.md), [known limitations](docs/known-issues.md) and [changelog](CHANGELOG.md). A locally built Playables package is a test candidate, not YouTube certification.
 
 ## Run and build
 
@@ -40,9 +40,10 @@ For the owner's Android and iPhone checks, follow [the phone playtest guide](doc
 - Pause with P or the on-screen button. Escape also pauses on the website; Playables leaves Escape to YouTube.
 - Menus support keyboard focus, mouse and touch. Settings include fixed/floating controls, left/right placement, reduced motion, shake, flashes, effects, contrast, damage numbers, and separate music/effects volumes.
 - Four hunters have distinct starting weapons, stat tradeoffs and passive signature traits.
-- Eight weapons have eight ranks and paired evolutions. Carry the matching passive at any rank and maximize the weapon, then collect a chest. When multiple evolutions qualify, choose one.
+- Eight weapons have eight ranks and paired evolutions. Carry the matching passive at any rank and maximize the weapon, then collect a chest. Choose carefully: only one weapon may evolve per hunt. Later chests grant one ordinary equipment rank and gold.
 - Six weapon and six passive slots; three rerolls, two skips and one banish per hunt.
-- An optional Covenant between minutes 10 and 14 offers a limited ritual challenge and a choice of build-changing rewards. It waits for a clear interval between scheduled fights. Declining costs nothing.
+- Fifteen ordinary enemy types enter at two-minute intervals, with mixed cohorts, increasing health and warned ranged/ground attacks. Every main and mini-boss has four times its version-0.3.0 health.
+- An optional Covenant between minutes 10 and 14 requires 60 kills inside a smaller shrine within 45 seconds, plus at least 30 seconds survived. Both hunter and defeated enemy must be inside for progress. Repeated mixed reinforcements and warned ground attacks add pressure. It waits for a clear interval between scheduled fights; declining costs nothing.
 - Mini-bosses arrive at 1, 3, 7, 9, 11, 13, 17, 19, 21, 23, 27 and 29 minutes; main bosses at 5, 10, 15, 20, 25 and 30. The Journal shows the complete schedule and attack guidance. Mini-bosses grant XP/gold; elites and non-final main bosses retain chest rewards.
 - Extra elite/swarm events wait during boss fights or rituals and retain recovery spacing. Mini-bosses can join an unfinished main fight; a later main boss waits for the occupied main-boss slot. Death's 30:00 finale retains priority. Screen-edge markers prioritize important threats and rewards.
 - Collected gold is checkpointed, retained on defeat or ending a hunt, and settled exactly once. Permanent ranks can be refunded at their recorded purchase cost outside an unfinished hunt.
@@ -61,7 +62,7 @@ RUN_LONG=1 node --import tsx --test tests/engine.long.test.ts
 BALANCE_SEEDS=1,2 node --import tsx scripts/simulate-balance.ts
 ```
 
-The long test is an explicitly assisted director/stability fixture. The balance script uses legal builds and a deterministic bot; neither substitutes for human playtests, device profiling or YouTube validation. Release UI exposes no time-skip or invulnerability shortcuts.
+The long test is an explicitly assisted director/stability fixture. The balance script uses legal equipment choices and a deterministic bot; `BALANCE_SURVIVAL_ASSIST=1` explicitly adds huge health for progression measurement, and `BALANCE_STAND_AFTER=300` tests stopping movement after five minutes. `scripts/diagnose-pressure.ts` compares stationary and orbiting fixed-build combat. These tools do not substitute for human playtests, device profiling or YouTube validation. Release UI exposes no time-skip or invulnerability shortcuts.
 
 Run `npm run build:qa` followed by `npm run preview:qa`, then open `http://127.0.0.1:4300/?debug=1` for the QA lab. The same lab is available from the Next development server with `?debug=1`. It uses a disposable in-memory profile, never reads or writes real progress, and can open each draft/chest/evolution/Covenant/outcome phase with chosen enemies and bosses. It includes rolling frame diagnostics and a battlefield-only PNG capture. The lab is excluded from production UI and invulnerable test runs cannot export resumable saves. Never submit `qa-output/` as a release.
 

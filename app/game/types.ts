@@ -69,7 +69,9 @@ export interface EnemyDef {
   xp: number;
   color: string;
   glow: string;
-  shape: "bat" | "ghoul" | "skeleton" | "spider" | "wraith" | "cultist" | "brute" | "hound" | "gargoyle" | "demon" | "golem" | "shadow";
+  shape: "bat" | "ghoul" | "skeleton" | "spider" | "wraith" | "cultist" | "brute" | "hound" | "gargoyle" | "demon" | "golem" | "shadow" | "lancer" | "banshee" | "scarab";
+  behavior?: "charge"; // Unspecified enemies pursue; charges commit after a warning.
+  attack?: "bolt" | "fan" | "hex"; // Warned ordinary-enemy attacks, separate from mini-boss patterns.
   knockResist?: number; // 0..1
 }
 

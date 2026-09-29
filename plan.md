@@ -2,9 +2,29 @@
 
 Prepared September 27, 2026. Execution authorized September 28, 2026. This is now the living design, implementation and verification record. Baseline audit observations below describe the pre-upgrade source; use the execution ledger for current status.
 
-Reading guide: the 0.3.0 boss expansion below is the latest candidate record. The 0.2.1 follow-up and September 28 ledger are historical; the latter maps every original section and issue to its implementation or explicit deferral. Sections 1–22 preserve the original audit, design hypotheses and proposed roadmap. Their words “current,” “proposed” and “next” refer to the September 27 baseline. Use the latest audit and [release checklist](docs/release-checklist.md) for work still required.
+Reading guide: the 0.4.0 playtest response below is the latest candidate record. The 0.3.0 boss expansion, 0.2.1 follow-up and September 28 ledger are historical; the latter maps every original section and issue to its implementation or explicit deferral. Sections 1–22 preserve the original audit, design hypotheses and proposed roadmap. Their words “current,” “proposed” and “next” refer to the September 27 baseline. Use the latest audit and [release checklist](docs/release-checklist.md) for work still required.
 
-## Boss expansion — 0.3.0, September 29, 2026
+## Playtest response — 0.4.0, September 29, 2026
+
+The owner's full-run feedback showed that five evolutions and early rank completion could erase waves while standing still. It also exposed a visible-drop failure at the pickup sprite cap. This pass implements all requested changes while keeping the 18-encounter schedule.
+
+| Playtest issue | Implemented response |
+| --- | --- |
+| Low encounter HP / weak later mobs | All 18 boss HP values are exactly 4× the prior version; ordinary spawn HP grows smoothly to 6.55× base at minute 15 and 16.6× at minute 30. |
+| Repetitive slow waves / stationary safety | Fifteen ordinary enemy types with introductions every two minutes, mixed cohorts, faster brutes, early warned projectiles, ground attacks and chargers. Three new silhouettes: Dread Lancer, Crimson Banshee, Iron Scarab. |
+| XP appears to stop dropping | Consolidate old matching pickups and put new loot at each kill location, preserving total XP/gold and stacked consumable/chest rewards within bounded pools/queues. |
+| Excessive evolved coverage/damage | One evolution per hunt; Meteor Storm radius 95→52 and Void Sphere size multiplier 2.1→1.2; Void pull removed. Evolution damage and cooldown bonuses reduced. |
+| Max build around minute 17 | Smoothly higher late XP requirements and one equipment rank per ordinary chest. Final normal-damage, huge-HP pacing probe had 48/78 ranks at minute 17 and completed at **30:01.52**. Human 27–30-minute timing remains a target. |
+| Trivial ritual | 60 kills within a 220-radius shrine, both hunter and victim inside; at least 30 seconds survived within 45 seconds, mixed reinforcements and ground attacks. Conditional damage blessings 10%; meat protection .5s. |
+| Compatibility / presentation | Snapshot-v3 migration preserves permanent progress, first earned evolution, XP fraction and boss health percentage. Updated one-evolution/ritual UI; warning effects survive cosmetic saturation. |
+
+**Verification:** 169 regular tests pass, plus the separate assisted full-run fixture with all 18 bosses, 14 elites and 7 swarms. Typecheck, lint, all production/QA builds and archive validation pass. Selected Chrome QA flows and an actual battlefield capture were reviewed. Eight normal-health bots produced seven defeats and one unfinished but alive finale; there is no normal-win claim. Fresh Knight seed 1 died in the first minute, so early hunter fairness is a specific next-playtest item. Twelve stationary/orbit comparisons per version also ran; their fixed equipment does not reproduce the owner's exact build.
+
+Current artifacts: standalone **431,385 bytes**; Playables ZIP **136,720 bytes**, five files / **434,588 bytes uncompressed**, SHA-256 `d7ab0a8d46d43df258c4a9c5cce03ae0aa592aa7692ce1ec199eb594d5cac6e2`. Detailed changes, raw results, limitations and reproduction commands: [difficulty update](docs/difficulty-update-0.4.0.md).
+
+**Next:** a fresh hunt with the owner's retained permanent ranks, recording first evolution, boss durations, movement pressure and build completion; then physical-phone and official YouTube gates in the [release checklist](docs/release-checklist.md). Existing upgraded mid-run builds do not rewind their ranks, so they cannot measure the new progression curve. Nothing was deployed or submitted.
+
+## Historical boss expansion — 0.3.0, September 29, 2026
 
 The requested expanded schedule is implemented and rebuilt. **Mini-bosses: minutes 1, 3, 7, 9, 11, 13, 17, 19, 21, 23, 27, 29. Main bosses: minutes 5, 10, 15, 20, 25, 30.** There are twelve named mini-bosses with charge, volley or slam patterns, and new main bosses at minutes 10, 20 and 25. Their authored health and damage rise through the hunt. The HUD reports the next encounter; the Journal contains all eighteen fights and attack guidance.
 

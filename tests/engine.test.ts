@@ -173,7 +173,7 @@ test("multiple eligible evolutions can be chosen explicitly", () => {
 
 test("Covenants remain optional and award one chosen rule",()=>{
   const {game,access}=setup({onCovenant(){}});game.time=601;game.bossesSpawned=new Set(BOSSES.filter(b=>b.minute<=10).map(b=>b.id));game.miniBossesSpawned=new Set(MINI_BOSSES.filter(b=>b.minute<=10).map(b=>b.id));access.updateCovenant(.01);assert.equal(game.phase,"covenant");
-  game.acceptCovenant();assert.equal(game.covenant!.status,"active");game.covenant!.progress=12;access.updateCovenant(.01);
+  game.acceptCovenant();assert.equal(game.covenant!.status,"active");assert.equal(game.covenant!.target,60);game.covenant!.progress=60;game.covenant!.remaining=15;access.updateCovenant(.01);
   assert.equal(game.covenant!.status,"reward");assert.equal(game.chooseCovenant("frost"),true);assert.equal(game.chooseCovenant("precision"),false);
 });
 
@@ -204,7 +204,7 @@ test("Fire evolution carries level area and uses matching warning geometry",()=>
   const {game,access}=setup();game.weapons=[{id:"fire",level:8,evolved:false,timer:0,alt:0}];access.updateWeapons(.01);
   assert.ok(Math.abs(game.bullets.find(b=>b.active)!.aoe - 111.6)<1e-8);
   game.bullets.forEach(b=>b.active=false);game.weapons[0].evolved=true;game.weapons[0].timer=0;access.updateWeapons(.01);access.updateScheduled(.01);
-  const meteor=game.bullets.find(b=>b.active)!;assert.equal(meteor.aoe,171);assert.equal(game.fx.find(f=>f.kind==='telegraph')!.radius,171);
+  const meteor=game.bullets.find(b=>b.active)!;assert.equal(meteor.aoe,52*1.8);assert.equal(game.fx.find(f=>f.kind==='telegraph')!.radius,52*1.8);
 });
 
 test("snapshot roundtrip preserves queued drafts and rejects incomplete entities",()=>{
@@ -219,10 +219,11 @@ test("evolved Frost retains a movement gap even with maximum cooldown reductions
   assert.ok(frozen>700,"control still has substantial uptime");assert.ok(frozen<1150,"a true movement gap remains");
 });
 
-test("XP milestones are smooth while the established late-game budget is preserved",async()=>{
+test("XP progression keeps the opening pace and smoothly extends the late build budget",async()=>{
   const {xpForLevel}=await import("../app/game/data");
-  for(const level of [...Array.from({length:8},(_,i)=>17+i),...Array.from({length:8},(_,i)=>37+i)])assert.ok(xpForLevel(level)/xpForLevel(level-1)<1.12);
-  assert.equal(xpForLevel(44),900);assert.equal(xpForLevel(80),1643);assert.equal(Array.from({length:79},(_,i)=>xpForLevel(i+1)).reduce((a,b)=>a+b,0),57260);
+  for(let level=13;level<=100;level++)assert.ok(xpForLevel(level)/xpForLevel(level-1)<1.16);
+  assert.equal(xpForLevel(12),104);assert.ok(xpForLevel(44)>1300);assert.ok(xpForLevel(80)>3700);
+  assert.ok(Array.from({length:79},(_,i)=>xpForLevel(i+1)).reduce((a,b)=>a+b,0)>100000);
 });
 
 test("every progress callback observes a restorable completed transaction",()=>{
@@ -245,9 +246,9 @@ test("hunter traits implement their displayed triggers and caps",()=>{
 
 test("Covenant rules match their descriptions without weakening terminal guards",()=>{
   const {game,access}=setup();const e=enemy(game,60,0);game.covenant={status:'complete',x:0,y:0,remaining:0,progress:12,target:12,reward:'precision'};
-  game.hitEnemy(e,10,false,0,0);assert.equal(e.hp,988);game.hitEnemy(e,10,false,0,0);assert.equal(e.hp,978);
-  game.covenant.reward='frost';e.slowF=0;e.slowT=1;game.hitEnemy(e,10,false,0,0);assert.equal(e.hp,966);
-  game.covenant.reward='sanctuary';game.hp=100;game.dropPickup('meat',0,0,0);access.update(.01);assert.equal(game.hp,120);assert.equal(game.iframes,1);
+  game.hitEnemy(e,10,false,0,0);assert.equal(e.hp,989);game.hitEnemy(e,10,false,0,0);assert.equal(e.hp,979);
+  game.covenant.reward='frost';e.slowF=0;e.slowT=1;game.hitEnemy(e,10,false,0,0);assert.equal(e.hp,968);
+  game.covenant.reward='sanctuary';game.hp=100;game.dropPickup('meat',0,0,0);access.update(.01);assert.equal(game.hp,120);assert.equal(game.iframes,.5);
 });
 
 test("QA scenarios are gated and never export resumable god-mode saves",()=>{
@@ -341,16 +342,16 @@ test("fireballs explode at the swept impact point instead of the far endpoint",(
   const fx=game.fx.find(f=>f.kind==='explosion')!;assert.equal(fx.x,105);
 });
 
-test("orb pulls cannot leave later projectile queries behind a stale grid cell",()=>{
+test("old orb AOE fields never pull targets into an unrelated projectile",()=>{
   const {game,access}=setup();const e=enemy(game,146,0);e.radius=45.6;access.buildGrid();
-  for(let i=0;i<12;i++)game.spawnBullet('orb',86,0,0,0,1,1,999,1,true,150);
+  for(let i=0;i<12;i++){const orb=game.spawnBullet('orb',86,0,0,0,1,1,999,1,true,150)!;orb.aoe=150;}
   game.spawnBullet('arrow',86,0,0,0,10,5,0,1,false,0);access.updateBullets(1/120);
-  assert.ok(Math.abs(e.x-136.5)<1e-8);assert.equal(e.hp,990);
+  assert.equal(e.x,146);assert.equal(e.hp,1000);
 });
 
 test("Hunter's Oath grants its first-hit bonus against full-health bosses",()=>{
   const {game}=setup();game.covenant={status:'complete',x:0,y:0,remaining:0,progress:12,target:12,reward:'precision'};game.spawnBoss(BOSSES[0]);
-  const hp=game.boss!.hp;game.hitBoss(10,false);assert.equal(game.boss!.hp,hp-12);game.hitBoss(10,false);assert.equal(game.boss!.hp,hp-22);
+  const hp=game.boss!.hp;game.hitBoss(10,false);assert.equal(game.boss!.hp,hp-11);game.hitBoss(10,false);assert.equal(game.boss!.hp,hp-21);
 });
 
 test("saved drafts reject impossible slots, ranks, ownership and evolution readiness atomically",()=>{

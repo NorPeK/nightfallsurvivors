@@ -71,7 +71,7 @@ export const WEAPONS: Record<string, WeaponDef> = {
     evolvesWith: "tome",
     evolvedName: "Void Sphere",
     evolvedIcon: "🕳️",
-    evolvedDesc: "A colossal sphere that drags enemies in and devours them.",
+    evolvedDesc: "A compact piercing sphere, 20% wider than Arcane Orb. It never pulls enemies.",
     maxLevel: 8,
     levels: [
       { desc: "Launches a piercing orb.", damage: 14, cooldown: 2.4, amount: 1, area: 1, speed: 130, duration: 3.2 },
@@ -137,7 +137,7 @@ export const WEAPONS: Record<string, WeaponDef> = {
     evolvesWith: "clover",
     evolvedName: "Meteor Storm",
     evolvedIcon: "☄️",
-    evolvedDesc: "Meteors hammer the battlefield in devastating waves.",
+    evolvedDesc: "Focused meteors strike small, clearly marked impact zones.",
     maxLevel: 8,
     levels: [
       { desc: "Hurls 1 exploding fireball.", damage: 15, cooldown: 1.9, amount: 1, area: 1, speed: 380 },
@@ -272,17 +272,20 @@ export const CHARACTERS: CharacterDef[] = [
 
 export const ENEMIES: Record<string, EnemyDef> = {
   bat: { id: "bat", name: "Night Bat", hp: 6, speed: 86, damage: 4, radius: 10, xp: 1, color: "#7a6cc7", glow: "#5b4bb5", shape: "bat" },
-  ghoul: { id: "ghoul", name: "Ghoul", hp: 14, speed: 44, damage: 7, radius: 13, xp: 1, color: "#6da06b", glow: "#3f7a4a", shape: "ghoul" },
+  ghoul: { id: "ghoul", name: "Ghoul", hp: 14, speed: 52, damage: 7, radius: 13, xp: 1, color: "#6da06b", glow: "#3f7a4a", shape: "ghoul" },
   skeleton: { id: "skeleton", name: "Skeleton", hp: 24, speed: 56, damage: 9, radius: 13, xp: 2, color: "#d8d3c5", glow: "#9a9484", shape: "skeleton" },
   spider: { id: "spider", name: "Crypt Spider", hp: 16, speed: 88, damage: 7, radius: 11, xp: 2, color: "#a4533d", glow: "#7c3326", shape: "spider" },
-  wraith: { id: "wraith", name: "Wraith", hp: 30, speed: 74, damage: 11, radius: 14, xp: 3, color: "#9fd4e8", glow: "#5fa8c8", shape: "wraith" },
-  cultist: { id: "cultist", name: "Cultist", hp: 48, speed: 52, damage: 13, radius: 14, xp: 4, color: "#c45a8a", glow: "#92325f", shape: "cultist" },
-  brute: { id: "brute", name: "Flesh Brute", hp: 95, speed: 36, damage: 18, radius: 22, xp: 7, color: "#bd7a5a", glow: "#8a4a30", shape: "brute", knockResist: 0.6 },
-  hound: { id: "hound", name: "Hellhound", hp: 55, speed: 104, damage: 14, radius: 13, xp: 5, color: "#e06a3c", glow: "#b03d18", shape: "hound" },
+  wraith: { id: "wraith", name: "Wraith", hp: 30, speed: 74, damage: 11, radius: 14, xp: 3, color: "#9fd4e8", glow: "#5fa8c8", shape: "wraith", attack: "hex" },
+  cultist: { id: "cultist", name: "Cultist", hp: 48, speed: 58, damage: 13, radius: 14, xp: 4, color: "#c45a8a", glow: "#92325f", shape: "cultist", attack: "bolt" },
+  brute: { id: "brute", name: "Flesh Brute", hp: 95, speed: 62, damage: 18, radius: 22, xp: 7, color: "#bd7a5a", glow: "#8a4a30", shape: "brute", knockResist: 0.6 },
+  hound: { id: "hound", name: "Hellhound", hp: 55, speed: 104, damage: 14, radius: 13, xp: 5, color: "#e06a3c", glow: "#b03d18", shape: "hound", behavior: "charge" },
   gargoyle: { id: "gargoyle", name: "Gargoyle", hp: 80, speed: 80, damage: 16, radius: 16, xp: 7, color: "#8d93a8", glow: "#5a6078", shape: "gargoyle" },
   demon: { id: "demon", name: "Pit Demon", hp: 140, speed: 58, damage: 22, radius: 19, xp: 10, color: "#d6453f", glow: "#9c1f1f", shape: "demon", knockResist: 0.5 },
   golem: { id: "golem", name: "Bone Golem", hp: 230, speed: 40, damage: 26, radius: 24, xp: 14, color: "#cfc4a8", glow: "#8f8468", shape: "golem", knockResist: 0.8 },
-  shadow: { id: "shadow", name: "Shadow Fiend", hp: 150, speed: 92, damage: 24, radius: 16, xp: 14, color: "#6b5fd1", glow: "#3c2f9e", shape: "shadow", knockResist: 0.4 },
+  shadow: { id: "shadow", name: "Shadow Fiend", hp: 150, speed: 92, damage: 24, radius: 16, xp: 14, color: "#6b5fd1", glow: "#3c2f9e", shape: "shadow", attack: "bolt", knockResist: 0.4 },
+  lancer: { id: "lancer", name: "Dread Lancer", hp: 190, speed: 76, damage: 25, radius: 18, xp: 12, color: "#5cacb8", glow: "#27818f", shape: "lancer", behavior: "charge", knockResist: 0.65 },
+  banshee: { id: "banshee", name: "Crimson Banshee", hp: 145, speed: 68, damage: 23, radius: 18, xp: 12, color: "#ee86ac", glow: "#c13973", shape: "banshee", attack: "fan", knockResist: 0.25 },
+  scarab: { id: "scarab", name: "Iron Scarab", hp: 300, speed: 60, damage: 29, radius: 23, xp: 16, color: "#c5a74a", glow: "#8c711e", shape: "scarab", knockResist: 0.85 },
 };
 
 // =====================================================================
@@ -295,7 +298,7 @@ export const BOSSES: BossDef[] = [
     name: "Korgath",
     title: "The Bone Colossus",
     minute: 5,
-    hp: 700,
+    hp: 2800,
     speed: 46,
     damage: 16,
     radius: 38,
@@ -308,7 +311,7 @@ export const BOSSES: BossDef[] = [
     name: "Varkos",
     title: "The Blood Warden",
     minute: 10,
-    hp: 3400,
+    hp: 13600,
     speed: 49,
     damage: 24,
     radius: 39,
@@ -321,7 +324,7 @@ export const BOSSES: BossDef[] = [
     name: "Maltheor",
     title: "The Hollow Lich",
     minute: 15,
-    hp: 7500,
+    hp: 30000,
     speed: 52,
     damage: 30,
     radius: 34,
@@ -334,7 +337,7 @@ export const BOSSES: BossDef[] = [
     name: "Rhazek",
     title: "The Dread Knight",
     minute: 20,
-    hp: 12500,
+    hp: 50000,
     speed: 59,
     damage: 34,
     radius: 37,
@@ -347,7 +350,7 @@ export const BOSSES: BossDef[] = [
     name: "Nyxara",
     title: "The Void Seer",
     minute: 25,
-    hp: 19500,
+    hp: 78000,
     speed: 56,
     damage: 37,
     radius: 36,
@@ -360,7 +363,7 @@ export const BOSSES: BossDef[] = [
     name: "NORPEK",
     title: "Death Incarnate",
     minute: 30,
-    hp: 26000,
+    hp: 104000,
     speed: 64,
     damage: 40,
     radius: 42,
@@ -373,55 +376,57 @@ export const BOSSES: BossDef[] = [
 // Mini-bosses keep their own field presence; they never replace a main boss.
 // Modest XP/gold rewards avoid adding twelve more guaranteed evolution chests.
 export const MINI_BOSSES: MiniBossDef[] = [
-  { id: "gravefang", name: "Gravefang", title: "The First Hunger", minute: 1, enemyId: "ghoul", hp: 150, speed: 52, damage: 8, radius: 24, xp: 18, gold: 12, pattern: "charge" },
-  { id: "bonehex", name: "Bonehex", title: "The Crypt Herald", minute: 3, enemyId: "skeleton", hp: 300, speed: 48, damage: 11, radius: 25, xp: 30, gold: 18, pattern: "volley" },
-  { id: "webmaw", name: "Webmaw", title: "The Buried Matriarch", minute: 7, enemyId: "spider", hp: 1300, speed: 60, damage: 17, radius: 27, xp: 60, gold: 30, pattern: "slam" },
-  { id: "mourningveil", name: "Mourningveil", title: "The Restless Oracle", minute: 9, enemyId: "wraith", hp: 2100, speed: 62, damage: 20, radius: 28, xp: 75, gold: 36, pattern: "volley" },
-  { id: "ashmaw", name: "Ashmaw", title: "The Cinder Hunter", minute: 11, enemyId: "hound", hp: 3200, speed: 70, damage: 22, radius: 27, xp: 90, gold: 42, pattern: "charge" },
-  { id: "gorebell", name: "Gorebell", title: "The Chapel Breaker", minute: 13, enemyId: "brute", hp: 4200, speed: 47, damage: 25, radius: 34, xp: 105, gold: 48, pattern: "slam" },
-  { id: "duskwing", name: "Duskwing", title: "The Fallen Watcher", minute: 17, enemyId: "gargoyle", hp: 6200, speed: 72, damage: 28, radius: 30, xp: 135, gold: 60, pattern: "charge" },
-  { id: "bloodcantor", name: "Bloodcantor", title: "The Scarlet Voice", minute: 19, enemyId: "cultist", hp: 8000, speed: 58, damage: 30, radius: 29, xp: 150, gold: 66, pattern: "volley" },
-  { id: "pitbreaker", name: "Pitbreaker", title: "The Furnace Fist", minute: 21, enemyId: "demon", hp: 10000, speed: 57, damage: 32, radius: 33, xp: 165, gold: 72, pattern: "slam" },
-  { id: "marrowking", name: "Marrowking", title: "The Ossuary Crown", minute: 23, enemyId: "golem", hp: 12000, speed: 48, damage: 34, radius: 38, xp: 180, gold: 78, pattern: "slam" },
-  { id: "nightreaver", name: "Nightreaver", title: "The Last Pursuer", minute: 27, enemyId: "shadow", hp: 15500, speed: 78, damage: 37, radius: 31, xp: 210, gold: 90, pattern: "charge" },
-  { id: "dawnless", name: "Dawnless", title: "The Final Omen", minute: 29, enemyId: "demon", hp: 18500, speed: 65, damage: 39, radius: 35, xp: 225, gold: 96, pattern: "volley" },
+  { id: "gravefang", name: "Gravefang", title: "The First Hunger", minute: 1, enemyId: "ghoul", hp: 600, speed: 52, damage: 8, radius: 24, xp: 18, gold: 12, pattern: "charge" },
+  { id: "bonehex", name: "Bonehex", title: "The Crypt Herald", minute: 3, enemyId: "skeleton", hp: 1200, speed: 48, damage: 11, radius: 25, xp: 30, gold: 18, pattern: "volley" },
+  { id: "webmaw", name: "Webmaw", title: "The Buried Matriarch", minute: 7, enemyId: "spider", hp: 5200, speed: 60, damage: 17, radius: 27, xp: 60, gold: 30, pattern: "slam" },
+  { id: "mourningveil", name: "Mourningveil", title: "The Restless Oracle", minute: 9, enemyId: "wraith", hp: 8400, speed: 62, damage: 20, radius: 28, xp: 75, gold: 36, pattern: "volley" },
+  { id: "ashmaw", name: "Ashmaw", title: "The Cinder Hunter", minute: 11, enemyId: "hound", hp: 12800, speed: 70, damage: 22, radius: 27, xp: 90, gold: 42, pattern: "charge" },
+  { id: "gorebell", name: "Gorebell", title: "The Chapel Breaker", minute: 13, enemyId: "brute", hp: 16800, speed: 47, damage: 25, radius: 34, xp: 105, gold: 48, pattern: "slam" },
+  { id: "duskwing", name: "Duskwing", title: "The Fallen Watcher", minute: 17, enemyId: "gargoyle", hp: 24800, speed: 72, damage: 28, radius: 30, xp: 135, gold: 60, pattern: "charge" },
+  { id: "bloodcantor", name: "Bloodcantor", title: "The Scarlet Voice", minute: 19, enemyId: "cultist", hp: 32000, speed: 58, damage: 30, radius: 29, xp: 150, gold: 66, pattern: "volley" },
+  { id: "pitbreaker", name: "Pitbreaker", title: "The Furnace Fist", minute: 21, enemyId: "demon", hp: 40000, speed: 57, damage: 32, radius: 33, xp: 165, gold: 72, pattern: "slam" },
+  { id: "marrowking", name: "Marrowking", title: "The Ossuary Crown", minute: 23, enemyId: "golem", hp: 48000, speed: 48, damage: 34, radius: 38, xp: 180, gold: 78, pattern: "slam" },
+  { id: "nightreaver", name: "Nightreaver", title: "The Last Pursuer", minute: 27, enemyId: "shadow", hp: 62000, speed: 78, damage: 37, radius: 31, xp: 210, gold: 90, pattern: "charge" },
+  { id: "dawnless", name: "Dawnless", title: "The Final Omen", minute: 29, enemyId: "demon", hp: 74000, speed: 65, damage: 39, radius: 35, xp: 225, gold: 96, pattern: "volley" },
 ];
 
 // =====================================================================
 // WAVES — Vampire Survivors style per-minute spawn director
 // =====================================================================
 
+// A new ordinary silhouette joins every two minutes. Odd minutes remix the known
+// cast; ranged enemies stay in the mix so a tank-only wave never creates an idle break.
 export const WAVES: WaveDef[] = [
   { minute: 0, enemies: ["bat"], interval: 1.4, perTick: 2, maxAlive: 30 },
-  { minute: 1, enemies: ["bat", "ghoul"], interval: 1.2, perTick: 3, maxAlive: 50 },
-  { minute: 2, enemies: ["ghoul", "skeleton"], interval: 1.1, perTick: 3, maxAlive: 65 },
-  { minute: 3, enemies: ["ghoul", "skeleton", "bat"], interval: 1.0, perTick: 4, maxAlive: 80 },
-  { minute: 4, enemies: ["skeleton", "spider"], interval: 1.05, perTick: 4, maxAlive: 85 },
-  { minute: 5, enemies: ["skeleton", "spider"], interval: 1.2, perTick: 3, maxAlive: 80 },
-  { minute: 6, enemies: ["spider", "wraith"], interval: 1.0, perTick: 4, maxAlive: 100 },
-  { minute: 7, enemies: ["spider", "wraith", "skeleton"], interval: 0.95, perTick: 5, maxAlive: 110 },
-  { minute: 8, enemies: ["wraith", "cultist"], interval: 0.9, perTick: 5, maxAlive: 130 },
-  { minute: 9, enemies: ["wraith", "cultist", "spider"], interval: 0.85, perTick: 5, maxAlive: 140 },
-  { minute: 10, enemies: ["cultist", "brute"], interval: 0.9, perTick: 5, maxAlive: 150 },
-  { minute: 11, enemies: ["cultist", "brute", "wraith"], interval: 0.85, perTick: 5, maxAlive: 160 },
-  { minute: 12, enemies: ["brute", "hound"], interval: 0.85, perTick: 5, maxAlive: 160 },
-  { minute: 13, enemies: ["brute", "hound", "cultist"], interval: 0.8, perTick: 5, maxAlive: 175 },
-  { minute: 14, enemies: ["hound", "gargoyle"], interval: 0.85, perTick: 5, maxAlive: 175 },
-  { minute: 15, enemies: ["hound", "gargoyle"], interval: 0.95, perTick: 5, maxAlive: 170 },
-  { minute: 16, enemies: ["gargoyle", "hound", "brute"], interval: 0.85, perTick: 5, maxAlive: 185 },
-  { minute: 17, enemies: ["gargoyle", "demon"], interval: 0.8, perTick: 6, maxAlive: 200 },
-  { minute: 18, enemies: ["demon", "gargoyle"], interval: 0.75, perTick: 6, maxAlive: 210 },
-  { minute: 19, enemies: ["demon", "hound"], interval: 0.75, perTick: 6, maxAlive: 215 },
-  { minute: 20, enemies: ["demon", "gargoyle", "hound"], interval: 0.75, perTick: 6, maxAlive: 220 },
-  { minute: 21, enemies: ["demon", "golem"], interval: 0.75, perTick: 6, maxAlive: 230 },
-  { minute: 22, enemies: ["golem", "demon"], interval: 0.7, perTick: 6, maxAlive: 240 },
-  { minute: 23, enemies: ["golem", "demon", "hound"], interval: 0.7, perTick: 7, maxAlive: 250 },
-  { minute: 24, enemies: ["golem", "shadow"], interval: 0.7, perTick: 7, maxAlive: 255 },
-  { minute: 25, enemies: ["shadow", "golem"], interval: 0.7, perTick: 6, maxAlive: 255 },
-  { minute: 26, enemies: ["shadow", "demon", "golem"], interval: 0.7, perTick: 6, maxAlive: 265 },
-  { minute: 27, enemies: ["shadow", "golem"], interval: 0.65, perTick: 7, maxAlive: 275 },
-  { minute: 28, enemies: ["shadow", "golem", "demon"], interval: 0.65, perTick: 7, maxAlive: 280 },
-  { minute: 29, enemies: ["shadow", "golem", "demon"], interval: 0.6, perTick: 7, maxAlive: 285 },
+  { minute: 1, enemies: ["bat"], interval: 1.2, perTick: 3, maxAlive: 50 },
+  { minute: 2, enemies: ["ghoul", "bat"], interval: 1.1, perTick: 3, maxAlive: 65 },
+  { minute: 3, enemies: ["bat", "ghoul", "ghoul"], interval: 1.0, perTick: 4, maxAlive: 80 },
+  { minute: 4, enemies: ["cultist", "ghoul", "bat"], interval: 1.05, perTick: 4, maxAlive: 85 },
+  { minute: 5, enemies: ["ghoul", "cultist", "bat"], interval: 1.2, perTick: 3, maxAlive: 80 },
+  { minute: 6, enemies: ["skeleton", "cultist", "ghoul", "bat"], interval: 1.0, perTick: 4, maxAlive: 100 },
+  { minute: 7, enemies: ["skeleton", "bat", "cultist", "ghoul"], interval: 0.95, perTick: 5, maxAlive: 110 },
+  { minute: 8, enemies: ["spider", "cultist", "skeleton", "ghoul"], interval: 0.9, perTick: 5, maxAlive: 130 },
+  { minute: 9, enemies: ["spider", "bat", "cultist", "skeleton"], interval: 0.85, perTick: 5, maxAlive: 140 },
+  { minute: 10, enemies: ["brute", "cultist", "spider", "skeleton"], interval: 0.9, perTick: 5, maxAlive: 150 },
+  { minute: 11, enemies: ["spider", "brute", "cultist", "ghoul"], interval: 0.85, perTick: 5, maxAlive: 160 },
+  { minute: 12, enemies: ["wraith", "brute", "spider", "cultist"], interval: 0.85, perTick: 5, maxAlive: 160 },
+  { minute: 13, enemies: ["wraith", "skeleton", "brute", "spider"], interval: 0.8, perTick: 5, maxAlive: 175 },
+  { minute: 14, enemies: ["hound", "wraith", "brute", "cultist"], interval: 0.85, perTick: 5, maxAlive: 175 },
+  { minute: 15, enemies: ["hound", "spider", "wraith", "brute"], interval: 0.95, perTick: 5, maxAlive: 170 },
+  { minute: 16, enemies: ["gargoyle", "hound", "wraith", "brute"], interval: 0.85, perTick: 5, maxAlive: 185 },
+  { minute: 17, enemies: ["gargoyle", "cultist", "hound", "skeleton"], interval: 0.8, perTick: 6, maxAlive: 200 },
+  { minute: 18, enemies: ["demon", "gargoyle", "wraith", "hound"], interval: 0.75, perTick: 6, maxAlive: 210 },
+  { minute: 19, enemies: ["demon", "brute", "cultist", "hound", "gargoyle"], interval: 0.75, perTick: 6, maxAlive: 215 },
+  { minute: 20, enemies: ["golem", "demon", "gargoyle", "wraith", "hound"], interval: 0.75, perTick: 6, maxAlive: 220 },
+  { minute: 21, enemies: ["golem", "cultist", "hound", "demon"], interval: 0.75, perTick: 6, maxAlive: 230 },
+  { minute: 22, enemies: ["shadow", "golem", "demon", "hound"], interval: 0.7, perTick: 6, maxAlive: 240 },
+  { minute: 23, enemies: ["shadow", "gargoyle", "brute", "wraith", "demon"], interval: 0.7, perTick: 7, maxAlive: 250 },
+  { minute: 24, enemies: ["lancer", "shadow", "golem", "demon", "wraith"], interval: 0.7, perTick: 7, maxAlive: 255 },
+  { minute: 25, enemies: ["lancer", "hound", "shadow", "gargoyle"], interval: 0.7, perTick: 6, maxAlive: 255 },
+  { minute: 26, enemies: ["banshee", "lancer", "golem", "shadow", "demon"], interval: 0.7, perTick: 6, maxAlive: 265 },
+  { minute: 27, enemies: ["banshee", "hound", "lancer", "wraith", "golem"], interval: 0.65, perTick: 7, maxAlive: 275 },
+  { minute: 28, enemies: ["scarab", "banshee", "lancer", "shadow", "demon"], interval: 0.65, perTick: 7, maxAlive: 280 },
+  { minute: 29, enemies: ["scarab", "banshee", "golem", "lancer", "hound"], interval: 0.6, perTick: 7, maxAlive: 285 },
 ];
 
 // Swarm events — VS-style rings of weak enemies converging on the player
@@ -435,8 +440,9 @@ export const ENCOUNTER_SPACING = 12;
 
 // Time-based difficulty scaling
 export function enemyHpScale(t: number): number {
-  const m = t / 60;
-  return 1 + m * 0.1 + Math.pow(m / 14, 1.8);
+  const m = Math.max(0, Math.min(GAME_DURATION, t)) / 60;
+  // Continuous pressure: old cohorts also toughen instead of becoming free XP.
+  return 1 + m * .22 + Math.pow(m / 10, 2);
 }
 export function enemyDmgScale(t: number): number {
   return 1 + (t / 60) * 0.04;
@@ -447,11 +453,12 @@ export function enemyXpScale(t: number): number {
 
 // XP curve (VS-like)
 export function xpForLevel(level: number): number {
-  // Preserve the long-run progression budget; spread milestone multipliers over eight ranks.
-  // This removes abrupt 42% / 75% jumps without flattening the late-game curve.
+  // Keep the opening twelve ranks, then gradually extend equipment progression.
+  // The continuous late ramp avoids sudden milestone walls or a time-gated build cap.
   const base = 5 + (Math.max(1, level) - 1) * 9;
   const ramp = (start: number) => Math.max(0, Math.min(1, (level - start) / 8));
-  return Math.round(base * (1 + .35 * ramp(16)) * (1 + .7 * ramp(36)));
+  const late = Math.max(0, level - 12);
+  return Math.round(base * (1 + .35 * ramp(16)) * (1 + .7 * ramp(36)) * (1 + .012 * late + .0001 * late * late));
 }
 export const FROST_NOVA_FREEZE = .7;
 
@@ -517,7 +524,7 @@ export function weaponUpgradeDetail(id: WeaponId, level: number): string {
     .map((key) => `${labels[key]}: ${before ? `${before[key]} → ` : ""}${now[key]}`).join(" · ");
 }
 export const COVENANT_REWARDS: CovenantOption[] = [
-  { id: "frost", name: "Winter Oath", desc: "Frozen enemies take 20% more damage. Pair with Absolute Zero." },
-  { id: "precision", name: "Hunter’s Oath", desc: "Your first hit on a full-health enemy deals 20% more damage. Reward careful opening attacks." },
-  { id: "sanctuary", name: "Mercy Oath", desc: "Collecting meat grants 1 second of protection; healing still caps at maximum health." },
+  { id: "frost", name: "Winter Oath", desc: "Frozen enemies take 10% more damage. Pair with Absolute Zero." },
+  { id: "precision", name: "Hunter’s Oath", desc: "Your first hit on a full-health enemy deals 10% more damage. Reward careful opening attacks." },
+  { id: "sanctuary", name: "Mercy Oath", desc: "Collecting meat grants half a second of protection; healing still caps at maximum health." },
 ];

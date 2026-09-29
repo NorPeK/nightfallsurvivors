@@ -30,7 +30,7 @@ for (const scene of scenes) {
   game.startRun("mage", stats); game.setViewport(1000, 600); game.time = scene.minute * 60; game.spawnTimer = 1e9;
   game.bossesSpawned = new Set(BOSSES.map(b => b.id)); game.miniBossesSpawned = new Set(MINI_BOSSES.map(b => b.id)); game.eliteSpawned = new Set(ELITE_MINUTES); game.swarmSpawned = new Set(SWARM_MINUTES);
   if (scene.full) {
-    game.weapons = (["orb", "bow", "lightning", "frost", "fire", "aura"] as WeaponId[]).map(id => ({ id, level: 8, evolved: true, timer: 0, alt: 0 }));
+    game.weapons = (["orb", "bow", "lightning", "frost", "fire", "aura"] as WeaponId[]).map(id => ({ id, level: 8, evolved: id === "fire", timer: 0, alt: 0 }));
     game.passives = (["might", "tome", "crystal", "eagle", "heart", "magnet"] as const).map(id => ({ id, level: 5 }));
     (game as unknown as { recomputePassives(): void }).recomputePassives();
   }

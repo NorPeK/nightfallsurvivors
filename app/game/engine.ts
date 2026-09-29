@@ -49,6 +49,7 @@ import type {
 } from "./types";
 import { Input } from "./input";
 import { audio } from "./audio";
+import { COVENANT_RADIUS, COVENANT_DURATION, COVENANT_TARGET, COVENANT_MIN_SURVIVAL } from "./rules";
 
 // ---------------------------------------------------------------- entities
 
@@ -731,7 +732,7 @@ export class Game {
     slot.radius = def.radius * (elite ? 1.9 : 1);
     slot.xp = def.xp * enemyXpScale(scalingTime) * (elite ? 10 : 1);
     slot.elite = elite;
-    slot.miniBossId = null; slot.attackTimer = 0;
+    slot.miniBossId = null; slot.attackTimer = this.rand(1.5, 3.5);
     slot.hitFlash = 0;
     slot.slowT = 0;
     slot.slowF = 1;
@@ -868,8 +869,15 @@ export class Game {
       for (const key of Object.keys(e.hitCooldowns)) e.hitCooldowns[key] = Math.max(0, e.hitCooldowns[key] - dt);
       e.wobble += dt * 6;
 
+      // Freezing a regular caster interrupts its committed cast. A dead or frozen
+      // caster cannot leave an invisible warning/attack behind.
+      const frozen = e.slowT > 0 && e.slowF === 0;
+      if (!e.miniBossId && frozen && (e.windup > 0 || this.scheduled.some((action) => action.owner === e.id))) {
+        this.cancelOwnedActions(e.id); e.windup = 0; e.charging = false;
+        e.attackTimer = Math.max(1, e.attackTimer); e.charge = Math.max(1, e.charge);
+      }
       let speedF = 1;
-      if (e.windup > 0 && e.def.shape !== "hound" && !e.miniBossId) { e.windup = Math.max(0, e.windup - dt); speedF = 0; }
+      if (e.windup > 0 && e.def.behavior !== "charge" && !e.miniBossId) { e.windup = Math.max(0, e.windup - dt); speedF = 0; }
       if (e.slowT > 0) {
         e.slowT -= dt;
         speedF *= e.slowF;
@@ -896,7 +904,7 @@ export class Game {
         vx = movement.x; vy = movement.y;
       }
       // Chargers announce and commit to a direction; freezing stops all voluntary movement.
-      if (!e.miniBossId && e.def.shape === "hound" && speedF > 0) {
+      if (!e.miniBossId && e.def.behavior === "charge" && speedF > 0) {
         e.charge -= dt;
         if (e.windup > 0) {
           e.windup -= dt; vx = vy = 0;
@@ -907,8 +915,16 @@ export class Game {
           if (e.charge <= 0) { e.charging = false; e.charge = this.rand(2.5, 4); }
         } else if (e.charge <= 0 && dist < 320 && dist > 110) {
           e.windup = .45; e.chargeX = dx / dist; e.chargeY = dy / dist;
-          this.addFx({ kind: "telegraph", shape: "line", x: e.x, y: e.y, x2: e.x + e.chargeX * 190, y2: e.y + e.chargeY * 190, t: 0, dur: .45, radius: e.radius, color: "#ff9f5b", angle: Math.atan2(dy, dx), arc: 0 });
+          if (!this.addFx({ kind: "telegraph", shape: "line", x: e.x, y: e.y, x2: e.x + e.chargeX * 190, y2: e.y + e.chargeY * 190, t: 0, dur: .45, radius: e.radius, color: "#ff9f5b", angle: Math.atan2(dy, dx), arc: 0, owner: e.id })) { e.windup = 0; e.charge = .5; }
         }
+      }
+      if (!e.miniBossId && e.def.attack && !frozen) {
+        const casting = this.updateEnemyAttack(e, dt, dx, dy, dist);
+        if (casting || e.windup > 0) vx = vy = 0;
+        // Ranged foes hold their attack distance; nearby casters still retreat
+        // slowly, leaving room to rush and interrupt them.
+        else if (dist < 180) { vx *= -.35; vy *= -.35; }
+        else if (dist < 270) { vx *= .2; vy *= .2; }
       }
       // wraith drift
       if (!e.miniBossId && (e.def.shape === "wraith" || e.def.shape === "shadow")) {
@@ -940,10 +956,30 @@ export class Game {
       e.ky *= Math.pow(0.0009, dt);
 
       // contact damage
-      if (!(e.windup > 0 && (e.def.shape !== "hound" || e.miniBossId)) && Math.hypot(this.px - e.x, this.py - e.y) < e.radius + 14 && this.iframes <= 0) {
+      if (!(e.windup > 0 && (e.def.behavior !== "charge" || e.miniBossId)) && Math.hypot(this.px - e.x, this.py - e.y) < e.radius + 14 && this.iframes <= 0) {
         this.damagePlayer(e.damage, this.encounterName(e));
       }
     }
+  }
+
+  private updateEnemyAttack(e: Enemy, dt: number, dx: number, dy: number, dist: number) {
+    if (e.windup > 0) return true;
+    e.attackTimer = Math.max(0, e.attackTimer - dt);
+    if (e.attackTimer > 0 || dist > (e.def.attack === "hex" ? 390 : 360)) return false;
+    // Keep simultaneous ordinary warnings readable even at the enemy pool cap.
+    // Deferred casts retry later; they never deal damage without a warning.
+    if (this.fx.length > 95 || this.scheduled.filter((action) => action.kind === "volley" || action.kind === "slam").length >= 12) {
+      e.attackTimer = this.rand(.4, .8); return false;
+    }
+    if (e.def.attack === "hex") {
+      e.windup = 1.1; e.attackTimer = 7;
+      this.warnSlam(e.id, this.px, this.py, 60, e.damage * .8, e.windup);
+    } else {
+      const fan = e.def.attack === "fan";
+      e.windup = .9; e.attackTimer = fan ? 6.2 : 4.8;
+      this.warnVolley(e.id, e.x, e.y, Math.atan2(dy, dx), fan ? 3 : 1, .24, 135 + Math.min(30, this.time / 60) * 2, e.damage * .7, e.windup);
+    }
+    return true;
   }
 
   private encounterName(entity: Enemy | Boss) {
@@ -956,12 +992,12 @@ export class Game {
   }
 
   private warnSlam(owner: number, x: number, y: number, radius: number, damage: number, delay = 1) {
-    this.addFx({ kind: "telegraph", shape: "circle", x, y, x2: 0, y2: 0, t: 0, dur: delay, radius, color: "#ffb45b", angle: 0, arc: 0, owner });
-    this.schedule(delay, "slam", [x, y, radius, damage], false, owner);
+    if (this.addFx({ kind: "telegraph", shape: "circle", x, y, x2: 0, y2: 0, t: 0, dur: delay, radius, color: "#ffb45b", angle: 0, arc: 0, owner })) this.schedule(delay, "slam", [x, y, radius, damage], false, owner);
   }
 
   private warnVolley(owner: number, x: number, y: number, angle: number, count: number, spread: number, speed: number, damage: number, delay = .85) {
     const radial = spread >= TAU;
+    if (this.fx.filter((effect) => effect.kind === "telegraph").length + (radial ? 1 : count) > 120) return;
     if (radial) this.addFx({ kind: "telegraph", shape: "circle", x, y, x2: 0, y2: 0, t: 0, dur: delay, radius: 70, color: "#ffc45b", angle, arc: 0, owner });
     else for (let i = 0; i < count; i++) {
       const ray = angle + (i - (count - 1) / 2) * spread;
@@ -986,7 +1022,7 @@ export class Game {
         e.attackTimer = def.minute < 5 ? 6 : 4.8;
         if (def.pattern === "charge") {
           e.windup = .8; e.chargeX = dx / dist; e.chargeY = dy / dist;
-          this.addFx({ kind: "telegraph", shape: "line", x: e.x, y: e.y, x2: e.x + e.chargeX * e.speed * 2.1, y2: e.y + e.chargeY * e.speed * 2.1, t: 0, dur: .8, radius: e.radius, color: "#ffc45b", angle: Math.atan2(dy, dx), arc: 0, owner: e.id });
+          if (!this.addFx({ kind: "telegraph", shape: "line", x: e.x, y: e.y, x2: e.x + e.chargeX * e.speed * 2.1, y2: e.y + e.chargeY * e.speed * 2.1, t: 0, dur: .8, radius: e.radius, color: "#ffc45b", angle: Math.atan2(dy, dx), arc: 0, owner: e.id })) e.windup = 0;
         } else if (def.pattern === "volley") {
           e.windup = .9;
           this.warnVolley(e.id, e.x, e.y, Math.atan2(dy, dx), def.minute < 10 ? 3 : 5, .24, 145 + def.minute * 2, e.damage * .65, .9);
@@ -1040,8 +1076,8 @@ export class Game {
   hitEnemy(e: Enemy, dmg: number, canCrit: boolean, kbX: number, kbY: number, opts?: { slow?: number; slowF?: number; quiet?: boolean }) {
     if (this.terminal || !e.active) return false;
     let final = dmg * this.stats.might;
-    if (this.covenant?.reward === "frost" && e.slowT > 0 && e.slowF === 0) final *= 1.2;
-    if (this.covenant?.reward === "precision" && e.hp === e.maxHp) final *= 1.2;
+    if (this.covenant?.reward === "frost" && e.slowT > 0 && e.slowF === 0) final *= 1.1;
+    if (this.covenant?.reward === "precision" && e.hp === e.maxHp) final *= 1.1;
     let crit = false;
     if (canCrit && this.random() < this.stats.critChance) {
       crit = true;
@@ -1072,9 +1108,9 @@ export class Game {
   private killEnemy(e: Enemy, drops: boolean) {
     if (!e.active || this.terminal) return;
     e.active = false;
-    if (e.miniBossId) this.cancelOwnedActions(e.id);
+    this.cancelOwnedActions(e.id);
     if (this.charId === "reaper" && this.source === "daggers" && this.traitCooldown <= 0) { this.heal(2); this.traitCooldown = 2; }
-    if (this.covenant?.status === "active" && Math.hypot(e.x - this.covenant.x, e.y - this.covenant.y) < 300) this.covenant.progress++;
+    if (drops && this.covenant?.status === "active" && Math.hypot(this.px - this.covenant.x, this.py - this.covenant.y) <= COVENANT_RADIUS && Math.hypot(e.x - this.covenant.x, e.y - this.covenant.y) <= COVENANT_RADIUS) this.covenant.progress = Math.min(this.covenant.target, this.covenant.progress + 1);
     this.kills++;
     this.burst(e.x, e.y, e.elite ? 18 : 7, e.def.color, e.elite ? 160 : 90);
     if (!drops) return;
@@ -1158,8 +1194,7 @@ export class Game {
         // slam telegraph at player position (generous 1.2s warning)
         const tx = this.px;
         const ty = this.py;
-        this.addFx({ kind: "telegraph", x: tx, y: ty, x2: 0, y2: 0, t: 0, dur: 1.2, radius: 120, color: "#ff9f5b", angle: 0, arc: 0, owner: b.id });
-        this.schedule(1.2, "slam", [tx, ty, 120, b.def.damage * 1.2], false, b.id);
+        if (this.addFx({ kind: "telegraph", x: tx, y: ty, x2: 0, y2: 0, t: 0, dur: 1.2, radius: 120, color: "#ff9f5b", angle: 0, arc: 0, owner: b.id })) this.schedule(1.2, "slam", [tx, ty, 120, b.def.damage * 1.2], false, b.id);
       }
       if (b.t2 <= 0) {
         b.t2 = 13;
@@ -1179,7 +1214,7 @@ export class Game {
         b.t1 = b.def.id === "bloodwarden" ? 8 : 7;
         b.windup = .95;
         b.dashX = dx / dist * speed * 3; b.dashY = dy / dist * speed * 3;
-        this.addFx({ kind: "telegraph", shape: "line", x: b.x, y: b.y, x2: b.x + b.dashX, y2: b.y + b.dashY, t: 0, dur: .95, radius: b.def.radius, color: b.def.glow, angle: Math.atan2(dy, dx), arc: 0, owner: b.id });
+        if (!this.addFx({ kind: "telegraph", shape: "line", x: b.x, y: b.y, x2: b.x + b.dashX, y2: b.y + b.dashY, t: 0, dur: .95, radius: b.def.radius, color: b.def.glow, angle: Math.atan2(dy, dx), arc: 0, owner: b.id })) b.windup = 0;
       }
       if (b.t2 <= 0) {
         b.t2 = 10;
@@ -1228,8 +1263,7 @@ export class Game {
         const a = this.random() * TAU;
         const x = this.px + Math.cos(a) * this.rand(240, 330);
         const y = this.py + Math.sin(a) * this.rand(240, 330);
-        this.addFx({ kind: "telegraph", shape: "circle", x, y, x2: 0, y2: 0, t: 0, dur: .8, radius: b.def.radius + 35, color: b.def.glow, angle: 0, arc: 0, owner: b.id });
-        this.schedule(.8, "teleport", [x, y, 0, 0], false, b.id);
+        if (this.addFx({ kind: "telegraph", shape: "circle", x, y, x2: 0, y2: 0, t: 0, dur: .8, radius: b.def.radius + 35, color: b.def.glow, angle: 0, arc: 0, owner: b.id })) this.schedule(.8, "teleport", [x, y, 0, 0], false, b.id);
       }
     } else if (b.def.id === "death") {
       // spiral scythe barrage
@@ -1256,7 +1290,7 @@ export class Game {
         b.t2 = 10 * enrageMul;
         b.windup = 0.7;
         b.dashX = dx / dist * speed * 3.2; b.dashY = dy / dist * speed * 3.2;
-        this.addFx({ kind: "telegraph", shape: "line", x: b.x, y: b.y, x2: b.x + b.dashX, y2: b.y + b.dashY, t: 0, dur: 0.7, radius: 40, color: "#ff2222", angle: Math.atan2(dy, dx), arc: 0, owner: b.id });
+        if (!this.addFx({ kind: "telegraph", shape: "line", x: b.x, y: b.y, x2: b.x + b.dashX, y2: b.y + b.dashY, t: 0, dur: 0.7, radius: 40, color: "#ff2222", angle: Math.atan2(dy, dx), arc: 0, owner: b.id })) b.windup = 0;
       }
       if (b.t3 <= 0) {
         b.t3 = 13 * enrageMul;
@@ -1293,7 +1327,7 @@ export class Game {
     const b = this.boss;
     if (!b || this.terminal) return false;
     let final = dmg * this.stats.might;
-    if (this.covenant?.reward === "precision" && b.hp === b.maxHp) final *= 1.2;
+    if (this.covenant?.reward === "precision" && b.hp === b.maxHp) final *= 1.1;
     let crit = false;
     if (canCrit && this.random() < this.stats.critChance) {
       crit = true;
@@ -1353,7 +1387,7 @@ export class Game {
       }
       w.timer -= dt;
       if (w.timer <= 0) {
-        const cd = L.cooldown * this.stats.cooldown * (w.evolved ? 0.8 : 1);
+        const cd = L.cooldown * this.stats.cooldown * (w.evolved ? 0.9 : 1);
         w.timer = Math.max(0.12, cd);
         this.fireWeapon(w, def, L);
       }
@@ -1417,7 +1451,7 @@ export class Game {
     switch (w.id) {
       case "swordwave": {
         const baseA = this.lastAim;
-        const dmg = L.damage * (evolved ? 1.7 : 1);
+        const dmg = L.damage * (evolved ? 1.4 : 1);
         const reach = 95 * area * (evolved ? 1.45 : 1);
         const dirs = evolved ? 3 : L.amount;
         for (let i = 0; i < dirs; i++) {
@@ -1436,7 +1470,7 @@ export class Game {
         if (target === null) break;
         const n = evolved ? L.amount + 3 : L.amount;
         const prepared = this.charId === "ranger" && this.traitCharge >= 3;
-        const dmg = L.damage * (evolved ? 1.4 : 1) * (prepared ? 1.25 : 1);
+        const dmg = L.damage * (evolved ? 1.2 : 1) * (prepared ? 1.25 : 1);
         if (prepared) this.traitCharge = 0;
         const spd = L.speed * this.stats.projSpeed * (evolved ? 1.25 : 1);
         for (let i = 0; i < n; i++) {
@@ -1453,15 +1487,15 @@ export class Game {
         for (let i = 0; i < n; i++) {
           const a = base + (i * TAU) / n + this.rand(-0.2, 0.2);
           const spd = L.speed * this.stats.projSpeed * (evolved ? 0.75 : 1);
-          const r = 16 * area * (evolved ? 2.1 : 1);
-          this.spawnBullet(evolved ? "orb" : "orb", this.px, this.py, Math.cos(a) * spd, Math.sin(a) * spd, L.damage * (evolved ? 1.5 : 1), r, 9999, L.duration * (evolved ? 1.4 : 1), evolved, evolved ? 150 : 0);
+          const r = 16 * area * (evolved ? 1.2 : 1);
+          this.spawnBullet("orb", this.px, this.py, Math.cos(a) * spd, Math.sin(a) * spd, L.damage * (evolved ? 1.2 : 1), r, 9999, L.duration * (evolved ? 1.2 : 1), evolved, 0);
         }
         audio.sfx("shoot");
         break;
       }
       case "lightning": {
         const strikes = evolved ? L.amount + 2 : L.amount;
-        const dmg = L.damage * (evolved ? 1.5 : 1);
+        const dmg = L.damage * (evolved ? 1.25 : 1);
         const r = 46 * area;
         for (let i = 0; i < strikes; i++) {
           const t = this.randomTarget();
@@ -1476,11 +1510,11 @@ export class Game {
           const r = 190 * area;
           this.addFx({ kind: "nova", x: this.px, y: this.py, x2: 0, y2: 0, t: 0, dur: 0.55, radius: r, color: "#a8ecff", angle: 0, arc: 0 });
           this.nearEnemies(this.px, this.py, r, (e) => {
-            this.hitEnemy(e, L.damage * 2.2, true, 0, 0, { slow: FROST_NOVA_FREEZE, slowF: 0, quiet: true });
+            this.hitEnemy(e, L.damage * 1.7, true, 0, 0, { slow: FROST_NOVA_FREEZE, slowF: 0, quiet: true });
           });
           if (this.boss) {
             const d = Math.hypot(this.boss.x - this.px, this.boss.y - this.py);
-            if (d < r + this.boss.def.radius) this.hitBoss(L.damage * 2.2, true);
+            if (d < r + this.boss.def.radius) this.hitBoss(L.damage * 1.7, true);
           }
           audio.sfx("frost");
         } else {
@@ -1506,7 +1540,7 @@ export class Game {
             const tx = t ? t.x + this.rand(-40, 40) : this.px + this.rand(-260, 260);
             const ty = t ? t.y + this.rand(-40, 40) : this.py + this.rand(-260, 260);
             const delay = i * 0.16;
-            this.schedule(delay, "meteor", [tx, ty, L.damage * 1.9, 95 * area], true);
+            this.schedule(delay, "meteor", [tx, ty, L.damage * 1.4, 52 * area], true);
           }
           audio.sfx("fire");
         } else {
@@ -1523,7 +1557,7 @@ export class Game {
       }
       case "aura": {
         const r = 92 * area * (evolved ? 1.6 : 1);
-        const dmg = L.damage * (evolved ? 1.4 : 1);
+        const dmg = L.damage * (evolved ? 1.2 : 1);
         this.nearEnemies(this.px, this.py, r, (e) => {
           const kb = evolved ? 90 : 18;
           const dx = e.x - this.px;
@@ -1601,7 +1635,7 @@ export class Game {
     const n = evolved ? 8 : L.amount;
     const orbitR = (62 + 10 * L.area) * this.stats.area * (evolved ? 1.5 : 1);
     const spin = L.speed * (evolved ? 1.5 : 1);
-    const dmg = L.damage * (evolved ? 1.5 : 1);
+    const dmg = L.damage * (evolved ? 1.25 : 1);
     this.orbAngle += dt * (spin - 2.4); // extra spin beyond base
     for (let i = 0; i < n; i++) {
       const a = this.orbAngle + (i * TAU) / n;
@@ -1655,7 +1689,7 @@ export class Game {
       b.maxLife = life;
       b.evolved = evolved;
       b.angle = Math.atan2(vy, vx);
-      b.aoe = aoe;
+      b.aoe = kind === "orb" ? 0 : aoe;
       b.tx = 0;
       b.ty = 0;
       return b;
@@ -1679,18 +1713,7 @@ export class Game {
       b.y += b.vy * dt;
       if (b.kind === "orb") b.angle += dt * 4;
 
-      // Void Sphere pull
-      if (b.kind === "orb" && b.evolved && b.aoe > 0) {
-        let pulled = false;
-        this.nearEnemies(b.x, b.y, b.aoe, (e) => {
-          const dx = b.x - e.x, dy = b.y - e.y;
-          const d = Math.hypot(dx, dy) || 1;
-          e.x += (dx / d) * 95 * dt;
-          e.y += (dy / d) * 95 * dt;
-          pulled = true;
-        });
-        if (pulled) this.gridDisplacement += 95 * dt;
-      }
+      // Orbs only damage direct intersections; even old serialized AOE fields cannot pull.
       if (b.kind === "meteor") continue; // damages on impact only
       const travel = Math.hypot(b.x - oldX, b.y - oldY);
       const query = (visit: (e: Enemy) => void) => this.nearEnemies((b.x + oldX) / 2, (b.y + oldY) / 2, b.radius + travel / 2, visit);
@@ -1803,58 +1826,72 @@ export class Game {
   // ------------------------------------------------------------- pickups
 
   dropPickup(kind: Pickup["kind"], x: number, y: number, value: number) {
-    if (this.terminal) return;
-    let slot: Pickup | null = null;
-    for (const p of this.pickups) {
-      if (!p.active) {
-        slot = p;
-        break;
-      }
-    }
+    if (this.terminal || !Number.isFinite(value) || value < 0) return;
+    const amount = kind === "gem" || kind === "coin" ? value : Math.max(1, Math.floor(value));
+    const slot = this.pickups.find((pickup) => !pickup.active) ?? this.consolidatePickupSlot();
     if (!slot) {
-      if (kind === "gem") {
-        // merge into a random live gem (VS-style consolidation)
-        const live = this.pickups.filter((p) => p.active && p.kind === "gem");
-        if (live.length) {
-          const g = live[Math.floor(this.random() * live.length)];
-          g.value += value;
-          g.tier = gemTier(g.value);
-        }
-      }
-      if (kind !== "gem" || !this.pickups.some((p) => p.active && p.kind === "gem")) {
-        // Critical rewards never disappear when visual pickup capacity is full.
-        const existing = this.deferredPickups.find((p) => p.kind === kind && kind !== "chest");
-        if (existing && (kind === "coin" || kind === "gem")) existing.value += value;
-        else this.deferredPickups.push({ kind, x, y, value });
-      }
+      // Normally unreachable with the full pool (six kinds and 700 slots),
+      // but a bounded, quantity-preserving fallback also supports tiny pools.
+      const existing = this.deferredPickups.find((pickup) => pickup.kind === kind);
+      if (existing) existing.value = this.pickupAmount(existing) + amount;
+      else this.deferredPickups.push({ kind, x, y, value: amount });
       return;
     }
     slot.active = true;
     slot.kind = kind;
     slot.x = x;
     slot.y = y;
-    slot.value = value;
-    slot.tier = kind === "gem" ? gemTier(value) : 0;
+    slot.value = amount;
+    slot.tier = kind === "gem" ? gemTier(amount) : 0;
     slot.vx = 0;
     slot.vy = 0;
     slot.attracted = false;
     slot.bob = this.visualRandom() * TAU;
   }
 
+  private pickupAmount(pickup: { kind: Pickup["kind"]; value: number }) {
+    // Old saves store zero for a single consumable/chest. Positive values now
+    // represent a stack, retaining every reward when sprite capacity is full.
+    return pickup.kind === "gem" || pickup.kind === "coin" ? pickup.value : Math.max(1, Math.floor(pickup.value));
+  }
+
+  private consolidatePickupSlot(): Pickup | null {
+    const groups = new Map<Pickup["kind"], Pickup[]>();
+    for (const pickup of this.pickups) {
+      if (!pickup.active) return pickup;
+      const group = groups.get(pickup.kind);
+      if (group) group.push(pickup); else groups.set(pickup.kind, [pickup]);
+    }
+    // Prefer consolidating old XP, then gold. Leave a newly dropped gem at the
+    // actual kill point instead of silently adding its XP to a random old gem.
+    const group = ["gem", "coin", "meat", "magnet", "bomb", "chest"].map((kind) => groups.get(kind as Pickup["kind"])).find((entries) => entries && entries.length >= 2);
+    if (!group) return null;
+    let donor = group[0];
+    for (const pickup of group) if ((pickup.x - this.px) ** 2 + (pickup.y - this.py) ** 2 > (donor.x - this.px) ** 2 + (donor.y - this.py) ** 2) donor = pickup;
+    let recipient: Pickup | null = null, nearest = Infinity;
+    for (const pickup of group) {
+      if (pickup === donor) continue;
+      const distance = (pickup.x - donor.x) ** 2 + (pickup.y - donor.y) ** 2;
+      if (distance < nearest) { nearest = distance; recipient = pickup; }
+    }
+    recipient!.value = this.pickupAmount(recipient!) + this.pickupAmount(donor);
+    if (recipient!.kind === "gem") recipient!.tier = gemTier(recipient!.value);
+    donor.active = false;
+    return donor;
+  }
+
   private flushPickups() {
-    while (this.deferredPickups.length && this.pickups.some((p) => !p.active)) {
-      const reward = this.deferredPickups.shift()!;
-      this.dropPickup(reward.kind, reward.x, reward.y, reward.value);
+    if (!this.deferredPickups.length) return;
+    // Reading old queues is also bounded: merge by kind before admission, then
+    // attempt each kind once. Requeued rewards cannot loop in the same frame.
+    const grouped = new Map<Pickup["kind"], { kind: Pickup["kind"]; x: number; y: number; value: number }>();
+    for (const reward of this.deferredPickups) {
+      const existing = grouped.get(reward.kind);
+      if (existing) existing.value += this.pickupAmount(reward);
+      else grouped.set(reward.kind, { ...reward, value: this.pickupAmount(reward) });
     }
-    // If all slots remain occupied, trade one gem sprite for a required chest while conserving XP.
-    if (this.deferredPickups.some((p) => p.kind === "chest")) {
-      const gems = this.pickups.filter((p) => p.active && p.kind === "gem");
-      if (gems.length >= 2) {
-        gems[1].value += gems[0].value; gems[1].tier = gemTier(gems[1].value); gems[0].active = false;
-        const idx = this.deferredPickups.findIndex((p) => p.kind === "chest");
-        const chest = this.deferredPickups.splice(idx, 1)[0]; this.dropPickup(chest.kind, chest.x, chest.y, chest.value);
-      }
-    }
+    this.deferredPickups = [];
+    for (const reward of grouped.values()) this.dropPickup(reward.kind, reward.x, reward.y, reward.value);
   }
   private updatePickups(dt: number) {
     const magnetR = this.stats.magnet;
@@ -1877,7 +1914,9 @@ export class Game {
       }
 
       if (d < 26) {
-        p.active = false;
+        const stacked = p.kind !== "gem" && p.kind !== "coin" && this.pickupAmount(p) > 1;
+        p.active = stacked;
+        if (stacked) p.value = this.pickupAmount(p) - 1;
         switch (p.kind) {
           case "gem": {
             this.gainXp(p.value);
@@ -1891,7 +1930,7 @@ export class Game {
           }
           case "meat": {
             this.heal(30);
-            if (this.covenant?.reward === "sanctuary") this.iframes = Math.max(this.iframes, 1);
+            if (this.covenant?.reward === "sanctuary") this.iframes = Math.max(this.iframes, .5);
             audio.sfx("heal");
             break;
           }
@@ -2051,7 +2090,7 @@ export class Game {
     return picks.map((option) => {
       if (option.kind !== "weapon") return option;
       const def = WEAPONS[option.id];
-      return { ...option, detail: weaponUpgradeDetail(def.id, option.level), partner: PASSIVES[def.evolvesWith].name, evolutionReady: option.level === def.maxLevel && this.passives.some((p) => p.id === def.evolvesWith) };
+      return { ...option, detail: weaponUpgradeDetail(def.id, option.level), partner: PASSIVES[def.evolvesWith].name, evolutionReady: !this.weapons.some((weapon) => weapon.evolved) && option.level === def.maxLevel && this.passives.some((p) => p.id === def.evolvesWith) };
     });
   }
   rerollDraft() {
@@ -2160,7 +2199,7 @@ export class Game {
   /** Opens the chest immediately, regardless of current modal phase. */
   private openChestNow(chosenEvolution?: WeaponId) {
     if (this.terminal) return;
-    const choices = this.weapons.filter((w) => !w.evolved && w.level === WEAPONS[w.id].maxLevel && this.passives.some((p) => p.id === WEAPONS[w.id].evolvesWith));
+    const choices = this.weapons.some((w) => w.evolved) ? [] : this.weapons.filter((w) => !w.evolved && w.level === WEAPONS[w.id].maxLevel && this.passives.some((p) => p.id === WEAPONS[w.id].evolvesWith));
     if (choices.length > 1 && !chosenEvolution && this.cb.onEvolutionChoice) {
       this.setPhase("evolution");
       this.currentDraft = choices.map((w) => ({ kind: "evolution", id: w.id, name: WEAPONS[w.id].evolvedName, icon: WEAPONS[w.id].evolvedIcon, color: WEAPONS[w.id].color, level: w.level, maxLevel: w.level, isNew: true, desc: WEAPONS[w.id].evolvedDesc }));
@@ -2168,7 +2207,7 @@ export class Game {
     }
     const rewards: ChestReward[] = [];
     // evolution check (VS rule: max-level weapon + its paired passive)
-    const evolvable = this.weapons.find(
+    const evolvable = this.weapons.some((w) => w.evolved) ? undefined : this.weapons.find(
       (w) => (!chosenEvolution || w.id === chosenEvolution) && !w.evolved && w.level >= WEAPONS[w.id].maxLevel && this.passives.some((p) => p.id === WEAPONS[w.id].evolvesWith),
     );
     if (evolvable) {
@@ -2178,10 +2217,8 @@ export class Game {
       rewards.push({ icon: def.evolvedIcon, name: def.evolvedName, desc: def.evolvedDesc, isEvolution: true });
       audio.sfx("evolve");
     } else {
-      // weighted level-ups
-      const luck = this.stats.luck;
-      const roll = this.random();
-      const n = roll < 0.06 * luck ? 5 : roll < 0.22 * luck ? 3 : 1;
+      // One equipment rank per chest. Luck improves its gold, never skips build progression.
+      const n = 1;
       for (let i = 0; i < n; i++) {
         const ups: { kind: "weapon" | "passive"; id: string }[] = [];
         for (const w of this.weapons) if (!w.evolved && w.level < WEAPONS[w.id].maxLevel) ups.push({ kind: "weapon", id: w.id });
@@ -2243,7 +2280,7 @@ export class Game {
   exportSnapshot() {
     if (!this.runId || this.terminal || this.disposed || this.debug) return null;
     return structuredClone({
-      version: 2 as const, runId: this.runId, charId: this.charId, phase: this.phase,
+      version: 3 as const, runId: this.runId, charId: this.charId, phase: this.phase,
       randomState: this.randomState, entitySerial: this.entitySerial, accumulator: this.accumulator,
       time: this.time, finalPhase: this.finalPhase, px: this.px, py: this.py, camX: this.camX, camY: this.camY,
       hp: this.hp, stats: this.stats, passiveBase: this.passiveBase, level: this.level, xp: this.xp, xpNext: this.xpNext,
@@ -2305,28 +2342,53 @@ export class Game {
   }
   private updateCovenant(dt: number) {
     if (!this.cb.onCovenant) return;
-    const encounterSoon = [...BOSSES.filter((boss) => !this.bossesSpawned.has(boss.id)), ...MINI_BOSSES.filter((mini) => !this.miniBossesSpawned.has(mini.id))].some((encounter) => encounter.minute * 60 - this.time <= 45 + ENCOUNTER_SPACING);
+    const encounterSoon = [...BOSSES.filter((boss) => !this.bossesSpawned.has(boss.id)), ...MINI_BOSSES.filter((mini) => !this.miniBossesSpawned.has(mini.id))].some((encounter) => encounter.minute * 60 - this.time <= COVENANT_DURATION + ENCOUNTER_SPACING);
     if (!this.covenant && !encounterSoon && !this.enemies.some((e) => e.active && e.miniBossId !== null) && this.time >= 10 * 60 && this.time < 14 * 60 && !this.boss && this.encounterCooldown <= 0 && this.phase === "playing") {
-      this.covenant = { status: "offered", x: this.px, y: this.py, remaining: 45, progress: 0, target: 12, reward: null };
+      this.covenant = { status: "offered", x: this.px, y: this.py, remaining: COVENANT_DURATION, progress: 0, target: COVENANT_TARGET, reward: null };
       this.setPhase("covenant"); this.cb.onCovenant([]); return;
     }
     const c = this.covenant;
     if (c?.status !== "active" || this.phase !== "playing") return;
+    const elapsedBefore = COVENANT_DURATION - c.remaining;
     c.remaining = Math.max(0, c.remaining - dt);
-    if (c.progress >= c.target) {
+    const elapsed = COVENANT_DURATION - c.remaining;
+    const inside = Math.hypot(this.px - c.x, this.py - c.y) <= COVENANT_RADIUS;
+    if (c.progress >= c.target && elapsed >= COVENANT_MIN_SURVIVAL && inside) {
       this.encounterCooldown = ENCOUNTER_SPACING;
       c.status = "reward"; this.setPhase("covenant"); this.cb.onCovenant(COVENANT_REWARDS);
     } else if (c.remaining <= 0) { c.status = "failed"; this.encounterCooldown = ENCOUNTER_SPACING; }
+    else {
+      if (Math.floor(elapsed / 6) > Math.floor(elapsedBefore / 6)) this.spawnCovenantWave(6, Math.floor(elapsed / 6));
+      if (Math.floor(elapsed / 5) > Math.floor(elapsedBefore / 5)) {
+        const caster = this.enemies.find((enemy) => enemy.active && Math.hypot(enemy.x - c.x, enemy.y - c.y) < 420);
+        if (caster && this.fx.length < 95) this.warnSlam(caster.id, this.px, this.py, 72, caster.damage, 1.15);
+      }
+    }
+  }
+  private spawnCovenantWave(count: number, wave: number) {
+    const c = this.covenant;
+    if (!c) return;
+    const pool = [ENEMIES.cultist, ENEMIES.hound, ENEMIES.brute, ENEMIES.wraith];
+    for (let i = 0; i < count; i++) {
+      const e = this.spawnEnemy(pool[(i + wave) % pool.length], false);
+      if (!e) break;
+      const angle = (i / count + wave * .137) * TAU;
+      e.x = c.x + Math.cos(angle) * 300; e.y = c.y + Math.sin(angle) * 300;
+      e.hp *= 1.35; e.maxHp = e.hp; e.damage *= 1.15; e.windup = .8;
+      if (e.def.behavior === "charge") {
+        const dx = this.px - e.x, dy = this.py - e.y, distance = Math.hypot(dx, dy) || 1;
+        e.chargeX = dx / distance; e.chargeY = dy / distance;
+        if (!this.addFx({ kind: "telegraph", shape: "line", x: e.x, y: e.y, x2: e.x + e.chargeX * 190, y2: e.y + e.chargeY * 190, t: 0, dur: .8, radius: e.radius, color: "#ff9f5b", angle: Math.atan2(dy, dx), arc: 0, owner: e.id })) { e.windup = 0; e.charge = 1; }
+      }
+      this.addFx({ kind: "summon", x: e.x, y: e.y, x2: 0, y2: 0, t: 0, dur: .8, radius: e.radius * 2, color: "#b78cff", angle: 0, arc: 0, owner: e.id });
+    }
   }
   acceptCovenant() {
     if (this.phase !== "covenant" || this.covenant?.status !== "offered" || this.suspended) return false;
     this.covenant.status = "active";
     this.encounterCooldown = ENCOUNTER_SPACING;
-    for (let i = 0; i < 12; i++) {
-      const e = this.spawnEnemy(ENEMIES.cultist, false);
-      if (e) { const a = i / 12 * TAU; e.x = this.covenant.x + Math.cos(a) * 260; e.y = this.covenant.y + Math.sin(a) * 260; e.windup = .8; }
-    }
-    this.addFx({ kind: "summon", x: this.covenant.x, y: this.covenant.y, x2: 0, y2: 0, t: 0, dur: 1, radius: 300, color: "#b78cff", angle: 0, arc: 0 });
+    this.spawnCovenantWave(12, 0);
+    this.addFx({ kind: "summon", x: this.covenant.x, y: this.covenant.y, x2: 0, y2: 0, t: 0, dur: 1, radius: COVENANT_RADIUS, color: "#b78cff", angle: 0, arc: 0 });
     this.setPhase("playing"); return true;
   }
   declineCovenant() {
@@ -2343,8 +2405,15 @@ export class Game {
   // ------------------------------------------------------------- fx helpers
 
   addFx(f: Fx) {
-    if (this.fx.length > 120) this.fx.shift();
+    if (this.fx.length >= 120) {
+      // Cosmetic bursts cannot erase an active damage warning. If every slot
+      // holds a warning, hostile callers defer their attack instead.
+      const disposable = this.fx.findIndex((effect) => effect.kind !== "telegraph");
+      if (disposable < 0) return false;
+      this.fx.splice(disposable, 1);
+    }
     this.fx.push(f);
+    return true;
   }
 
   private updateFx(dt: number) {
@@ -2473,7 +2542,7 @@ export class Game {
     this.setPhase("playing"); this.buildGrid();
     if (options.phase === "levelup") this.gainXp(this.xpNext);
     if (options.phase === "chest" || options.phase === "evolution") this.openChestNow();
-    if (options.phase === "covenant") { this.covenant = { status: "offered", x: this.px, y: this.py, remaining: 45, progress: 0, target: 12, reward: null }; this.setPhase("covenant"); this.cb.onCovenant?.([]); }
+    if (options.phase === "covenant") { this.covenant = { status: "offered", x: this.px, y: this.py, remaining: COVENANT_DURATION, progress: 0, target: COVENANT_TARGET, reward: null }; this.setPhase("covenant"); this.cb.onCovenant?.([]); }
     if (options.phase === "paused") this.pause();
     if (options.phase === "gameover") this.endRun(false);
     if (options.phase === "victory") this.endRun(true);
@@ -2514,7 +2583,7 @@ export class Game {
       stats: { ...this.stats }, draftTools: { ...this.draftTools }, runId: this.runId,
       finaleTime: Math.max(0, this.time - GAME_DURATION), trait: CHARACTERS.find((c) => c.id === this.charId)?.trait ?? "", covenant: this.covenant ? { ...this.covenant } : null,
       weapons: this.weapons.map((w) => ({
-        id: w.id, name: w.evolved ? WEAPONS[w.id].evolvedName : WEAPONS[w.id].name, desc: w.evolved ? WEAPONS[w.id].evolvedDesc : weaponUpgradeDetail(w.id, w.level), partner: PASSIVES[WEAPONS[w.id].evolvesWith].name, evolutionReady: !w.evolved && w.level === WEAPONS[w.id].maxLevel && this.passives.some((p) => p.id === WEAPONS[w.id].evolvesWith),
+        id: w.id, name: w.evolved ? WEAPONS[w.id].evolvedName : WEAPONS[w.id].name, desc: w.evolved ? WEAPONS[w.id].evolvedDesc : weaponUpgradeDetail(w.id, w.level), partner: PASSIVES[WEAPONS[w.id].evolvesWith].name, evolutionReady: !this.weapons.some((owned) => owned.evolved) && !w.evolved && w.level === WEAPONS[w.id].maxLevel && this.passives.some((p) => p.id === WEAPONS[w.id].evolvesWith),
         icon: w.evolved ? WEAPONS[w.id].evolvedIcon : WEAPONS[w.id].icon,
         level: w.level,
         maxLevel: WEAPONS[w.id].maxLevel,
@@ -2565,7 +2634,7 @@ function validUpgradeForBuild(option: UpgradeOption, weapons: WeaponState[], pas
     if (!Object.hasOwn(WEAPONS, option.id)) return false;
     const def = WEAPONS[option.id], owned = weapons.find((w) => w.id === option.id);
     if (option.maxLevel !== def.maxLevel) return false;
-    if (option.kind === "evolution") return !!owned && !owned.evolved && owned.level === def.maxLevel && option.level === def.maxLevel && option.isNew && passives.some((p) => p.id === def.evolvesWith);
+    if (option.kind === "evolution") return !weapons.some((weapon) => weapon.evolved) && !!owned && !owned.evolved && owned.level === def.maxLevel && option.level === def.maxLevel && option.isNew && passives.some((p) => p.id === def.evolvesWith);
     if (banished.has(option.id)) return false;
     return owned ? !option.isNew && !owned.evolved && owned.level < def.maxLevel && option.level === owned.level + 1 : option.isNew && option.level === 1 && weapons.length < MAX_WEAPONS;
   }
@@ -2576,21 +2645,70 @@ function validUpgradeForBuild(option: UpgradeOption, weapons: WeaponState[], pas
   }
   return false;
 }
-/** Version 1 predates the added encounter schedule. Do not replay missed new fights on reload. */
+/** Older hunts retain earned progression while adopting the current encounter and evolution rules. */
 function migrateSnapshot(value: unknown): unknown {
   try {
-    if (!value || typeof value !== "object" || !("version" in value) || value.version !== 1) return value;
+    if (!value || typeof value !== "object" || !("version" in value) || ![1, 2].includes(value.version as number)) return value;
     if (JSON.stringify(value).length > 900_000) return null;
     const legacy = structuredClone(value) as Record<string, unknown>;
-    if (Object.hasOwn(legacy, "miniBossesSpawned") || typeof legacy.time !== "number" || !Number.isFinite(legacy.time) || !Array.isArray(legacy.enemies) || !Array.isArray(legacy.bossesSpawned) || !legacy.metrics || typeof legacy.metrics !== "object") return null;
-    const historical = MINI_BOSSES.filter((mini) => mini.minute * 60 <= (legacy.time as number)).map((mini) => mini.id);
-    const oldBossIds = new Set(["colossus", "lich", "death"]);
-    const newHistoricalBosses = BOSSES.filter((boss) => !oldBossIds.has(boss.id) && boss.minute * 60 <= (legacy.time as number)).map((boss) => boss.id);
-    legacy.version = 2;
-    legacy.miniBossesSpawned = historical;
-    legacy.bossesSpawned = [...new Set([...legacy.bossesSpawned, ...newHistoricalBosses])];
-    legacy.enemies = legacy.enemies.map((enemy: Record<string, unknown>) => ({ ...enemy, miniBossId: null, attackTimer: 0 }));
-    legacy.metrics = { ...legacy.metrics, miniBossesDefeated: [] };
+    if (typeof legacy.time !== "number" || !Number.isFinite(legacy.time) || !Array.isArray(legacy.enemies) || !Array.isArray(legacy.bossesSpawned) || !legacy.metrics || typeof legacy.metrics !== "object") return null;
+    if (legacy.version === 1) {
+      if (Object.hasOwn(legacy, "miniBossesSpawned")) return null;
+      legacy.miniBossesSpawned = MINI_BOSSES.filter((mini) => mini.minute * 60 <= (legacy.time as number)).map((mini) => mini.id);
+      const oldBossIds = new Set(["colossus", "lich", "death"]);
+      const historical = BOSSES.filter((boss) => !oldBossIds.has(boss.id) && boss.minute * 60 <= (legacy.time as number)).map((boss) => boss.id);
+      legacy.bossesSpawned = [...new Set([...legacy.bossesSpawned, ...historical])];
+      legacy.enemies = legacy.enemies.map((enemy: Record<string, unknown>) => ({ ...enemy, miniBossId: null, attackTimer: 0 }));
+      legacy.metrics = { ...legacy.metrics, miniBossesDefeated: [] };
+    }
+    if (!Array.isArray(legacy.weapons) || !Array.isArray(legacy.bullets) || !Array.isArray(legacy.scheduled) || !Array.isArray(legacy.currentDraft) || typeof legacy.level !== "number" || typeof legacy.xp !== "number" || typeof legacy.xpNext !== "number" || !Number.isInteger(legacy.level) || legacy.level < 1 || !Number.isFinite(legacy.xp) || !Number.isFinite(legacy.xpNext) || legacy.xp < 0 || legacy.xpNext <= 0 || legacy.xp >= legacy.xpNext) return null;
+    const evolvedWeapons = (legacy.weapons as Record<string, unknown>[]).filter((weapon) => weapon.evolved === true);
+    const earnedEvolutions = (legacy.metrics as Record<string, unknown>).evolutions;
+    const retainedId = (Array.isArray(earnedEvolutions) ? earnedEvolutions.find((id) => evolvedWeapons.some((weapon) => weapon.id === id)) : undefined) ?? evolvedWeapons[0]?.id;
+    const retainedEvolution = retainedId !== undefined;
+    legacy.weapons = legacy.weapons.map((weapon: Record<string, unknown>) => {
+      if (!weapon.evolved) return weapon;
+      if (weapon.level !== 8) throw new Error("Invalid legacy evolution rank");
+      return { ...weapon, evolved: weapon.id === retainedId };
+    });
+    // Boss tuning applies to fights already underway without healing away earned damage.
+    const rescaleHealth = (entity: Record<string, unknown>, maximum: number) => {
+      if (typeof entity.hp !== "number" || typeof entity.maxHp !== "number" || !Number.isFinite(entity.hp) || !Number.isFinite(entity.maxHp) || entity.hp <= 0 || entity.maxHp <= 0 || entity.hp > entity.maxHp) throw new Error("Invalid legacy encounter health");
+      entity.hp = entity.hp / entity.maxHp * maximum; entity.maxHp = maximum;
+    };
+    if (legacy.boss && typeof legacy.boss === "object") {
+      const boss = legacy.boss as Record<string, unknown>, def = boss.def as { id?: string } | null;
+      const canonical = BOSSES.find((candidate) => candidate.id === def?.id);
+      if (!canonical) return null;
+      rescaleHealth(boss, canonical.hp);
+    }
+    for (const enemy of legacy.enemies as Record<string, unknown>[]) if (enemy.miniBossId) {
+      const canonical = MINI_BOSSES.find((mini) => mini.id === enemy.miniBossId);
+      if (!canonical) return null;
+      rescaleHealth(enemy, canonical.hp);
+    }
+    // Ordinary enemies retain birth-time HP; newly admitted foes use the current gradual curve.
+    const oldFraction = legacy.xp / legacy.xpNext;
+    legacy.xpNext = xpForLevel(legacy.level);
+    legacy.xp = oldFraction * (legacy.xpNext as number);
+    // Retire old oversized projectiles and queued player casts; hostile tells remain intact.
+    legacy.bullets = [];
+    legacy.scheduled = legacy.scheduled.filter((action: Record<string, unknown>) => action.owner !== undefined);
+    if (retainedEvolution) legacy.currentDraft = legacy.currentDraft.map((option: Record<string, unknown>) => ({ ...option, evolutionReady: false }));
+    if (retainedEvolution && legacy.phase === "evolution") {
+      if (typeof legacy.pendingChest !== "number") return null;
+      legacy.pendingChest++;
+      legacy.phase = "chest"; legacy.currentDraft = [];
+      legacy.currentChest = [{ icon: "📜", name: "Evolution retained", desc: "Your first evolution remains active. This chest will grant its normal reward next.", isEvolution: false }];
+    }
+    if (legacy.covenant && typeof legacy.covenant === "object") {
+      const covenant = legacy.covenant as Record<string, unknown>;
+      if (["offered", "active"].includes(covenant.status as string)) {
+        if (typeof covenant.target !== "number" || covenant.target <= 0 || typeof covenant.progress !== "number" || covenant.progress < 0) return null;
+        covenant.progress = Math.min(60, Math.floor(covenant.progress / covenant.target * 60)); covenant.target = 60;
+      }
+    }
+    legacy.version = 3;
     return legacy;
   } catch { return null; }
 }
@@ -2599,7 +2717,7 @@ function validSnapshot(value: unknown): value is GameSnapshot {
   if (!value || typeof value !== "object") return false;
   const s = value as GameSnapshot;
   try {
-    if (JSON.stringify(s).length > 900_000 || s.version !== 2 || typeof s.runId !== "string" || s.runId.length > 100 || !s.runId || !CHARACTERS.some((c) => c.id === s.charId)) return false;
+    if (JSON.stringify(s).length > 900_000 || s.version !== 3 || typeof s.runId !== "string" || s.runId.length > 100 || !s.runId || !CHARACTERS.some((c) => c.id === s.charId)) return false;
     const own = (catalog: object, id: unknown): id is string => typeof id === "string" && Object.hasOwn(catalog, id);
     const text = (v: unknown, max = 2048) => typeof v === "string" && v.length <= max;
     const keys = "version runId charId phase randomState entitySerial accumulator time finalPhase px py camX camY hp stats passiveBase level xp xpNext kills runGold damageDealt iframes faceX weapons passives boss enemies bullets enemyBullets pickups scheduled deferredPickups fx bossesSpawned miniBossesSpawned eliteSpawned swarmSpawned spawnTimer encounterCooldown orbAngle pendingChest levelUpsQueued currentDraft currentChest banished draftTools covenant traitCharge traitCooldown traitCasts lastAim source metrics damageCause".split(" ");
@@ -2609,11 +2727,11 @@ function validSnapshot(value: unknown): value is GameSnapshot {
     const numeric = (v: unknown, fields: string) => !!v && typeof v === "object" && fields.split(" ").every((key) => typeof (v as Record<string, unknown>)[key] === "number" && Number.isFinite((v as Record<string, number>)[key]));
     const nonnegativeRecord = (v: unknown) => !!v && typeof v === "object" && !Array.isArray(v) && Object.values(v).every((n) => typeof n === "number" && n >= 0 && Number.isFinite(n));
     if (!numeric(s, "randomState entitySerial accumulator time px py camX camY hp level xp xpNext kills runGold damageDealt iframes faceX spawnTimer encounterCooldown orbAngle pendingChest levelUpsQueued traitCharge traitCooldown traitCasts lastAim") || typeof s.finalPhase !== "boolean" || typeof s.source !== "string" || typeof s.damageCause !== "string") return false;
-    if (!Number.isInteger(s.entitySerial) || !Number.isInteger(s.randomState) || s.randomState > 0xffffffff || s.entitySerial < 0 || s.accumulator < 0 || s.accumulator > .25 || s.encounterCooldown < 0 || s.encounterCooldown > ENCOUNTER_SPACING || s.pendingChest < 0 || s.levelUpsQueued < 0) return false;
+    if (!Number.isInteger(s.entitySerial) || !Number.isInteger(s.randomState) || s.randomState > 0xffffffff || s.entitySerial < 0 || s.accumulator < 0 || s.accumulator > .25 || s.encounterCooldown < 0 || s.encounterCooldown > ENCOUNTER_SPACING || s.pendingChest < 0 || s.levelUpsQueued < 0 || !Number.isInteger(s.level) || s.xp < 0 || s.xpNext <= 0 || s.xp >= s.xpNext) return false;
     const validStats = (stats: PlayerStats | null) => stats && Object.keys(BASE_SNAPSHOT_STATS).every((key) => typeof stats[key as keyof PlayerStats] === "number" && Number.isFinite(stats[key as keyof PlayerStats]) && stats[key as keyof PlayerStats] >= 0);
     if (!validStats(s.stats) || !validStats(s.passiveBase)) return false;
     if (!Array.isArray(s.weapons) || s.weapons.length > MAX_WEAPONS || s.weapons.some((w) => !own(WEAPONS, w.id) || !Number.isInteger(w.level) || w.level < 1 || w.level > 8 || typeof w.evolved !== "boolean" || typeof w.timer !== "number" || typeof w.alt !== "number")) return false;
-    if (new Set(s.weapons.map((w) => w.id)).size !== s.weapons.length) return false;
+    if (new Set(s.weapons.map((w) => w.id)).size !== s.weapons.length || s.weapons.filter((w) => w.evolved).length > 1 || s.weapons.some((w) => w.evolved && w.level !== 8)) return false;
     if (!Array.isArray(s.passives) || s.passives.length > MAX_PASSIVES || s.passives.some((p) => !own(PASSIVES, p.id) || !Number.isInteger(p.level) || p.level < 1 || p.level > 5)) return false;
     if (new Set(s.passives.map((p) => p.id)).size !== s.passives.length) return false;
     const entity = (e: { x: number; y: number; active: boolean }) => typeof e.x === "number" && typeof e.y === "number" && e.active === true;
@@ -2632,7 +2750,7 @@ function validSnapshot(value: unknown): value is GameSnapshot {
     if (!numeric(s.metrics, "overkill damageTaken healing xpCollected") || !nonnegativeRecord(s.metrics.damageByWeapon) || !nonnegativeRecord(s.metrics.goldBySource) || !Array.isArray(s.metrics.bossesDefeated) || !Array.isArray(s.metrics.evolutions) || !Array.isArray(s.metrics.miniBossesDefeated)) return false;
     if (s.covenant && (!numeric(s.covenant, "x y remaining progress target") || !["offered", "active", "reward", "complete", "declined", "failed"].includes(s.covenant.status) || s.covenant.reward !== null && !COVENANT_REWARDS.some((r) => r.id === s.covenant?.reward))) return false;
     if (s.fx.length > 121 || s.fx.some((f) => !numeric(f, "x y x2 y2 t dur radius angle arc") || !["slash", "ring", "bolt", "explosion", "telegraph", "nova", "summon"].includes(f.kind))) return false;
-    if (s.deferredPickups.length > 2000 || s.deferredPickups.some((p) => !numeric(p, "x y value") || !["gem", "coin", "meat", "magnet", "bomb", "chest"].includes(p.kind))) return false;
+    if (s.deferredPickups.length > 2000 || s.deferredPickups.some((p) => !numeric(p, "x y value") || p.value < 0 || !["gem", "coin", "meat", "magnet", "bomb", "chest"].includes(p.kind))) return false;
     if (["levelup", "evolution"].includes(s.phase) && !s.currentDraft.length || s.phase === "chest" && !s.currentChest.length || s.phase === "covenant" && (!s.covenant || !["offered", "reward"].includes(s.covenant.status))) return false;
     if (s.currentChest.length > 6 || s.currentChest.some((r) => !text(r.name) || !text(r.desc) || !text(r.icon, 100) || typeof r.isEvolution !== "boolean")) return false;
     if (s.miniBossesSpawned.length > MINI_BOSSES.length || new Set(s.miniBossesSpawned).size !== s.miniBossesSpawned.length || s.miniBossesSpawned.some((id) => !MINI_BOSSES.some((mini) => mini.id === id)) || s.bossesSpawned.some((id) => !BOSSES.some((b) => b.id === id)) || s.eliteSpawned.some((minute) => !ELITE_MINUTES.includes(minute)) || s.swarmSpawned.some((minute) => !SWARM_MINUTES.includes(minute)) || s.banished.some((id) => !own(WEAPONS, id) && !own(PASSIVES, id))) return false;

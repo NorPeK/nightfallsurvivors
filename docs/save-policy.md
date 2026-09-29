@@ -2,7 +2,9 @@
 
 Profile schema: **2**. Browser storage key remains `norpek-nightfall-save-v1` to preserve existing installations. Snapshot schema and content compatibility are checked independently by the simulation.
 
-Version 0.3.0 uses **engine snapshot schema 2** inside the unchanged version-1 active-run wrapper. It stores mini-boss identities, delivered encounters, attack timers and delayed actions. Engine schema-1 checkpoints migrate by skipping newly added encounters at or before the saved minute, without adding kill credit or rewards. Future encounters use the expanded schedule. Permanent currency/ranks remain unchanged; older history without mini-boss metrics loads with an empty list.
+Version 0.4.0 uses **engine snapshot schema 3** inside the unchanged version-1 active-run wrapper. It enforces one live evolution, keeps the first earned evolution (inventory order is the fallback), and returns any other evolved weapons to their ordinary maximum rank. Historical achievement/evolution credit is preserved. The XP bar retains its fractional completion against the new XP curve; existing equipment ranks are not rewound.
+
+Engine-v1/v2 migration rescales live main/mini health to current definitions while preserving the remaining percentage. Ordinary enemies already alive keep their birth-time health; new spawns use the stronger curve. Oversized legacy player projectiles and queued player casts are retired, while hostile delayed actions remain. Offered/active rituals migrate to the new target with proportional kill progress. Engine-v1 also skips newly introduced encounters whose times have passed without inventing rewards. Stacked consumables/chests treat legacy zero-valued records as one item. New snapshots retain enemy attack timers and validate the single-evolution limit. Permanent currency/ranks remain unchanged.
 
 ## Permanent progress
 
@@ -30,6 +32,6 @@ Website and YouTube saves are separate. The Playables target never falls back to
 
 1. Retain the candidate ZIP/manifest and deployed source revision together. Record save schema/content version with the release.
 2. Before release, test existing profile migration and representative active snapshots on the new version.
-3. If a release must be withdrawn, prefer rolling forward with a fix that understands profile schema 2 and engine snapshot schema 2. The original version-1 implementation is not a safe blind rollback. Versions 0.2.x also do not understand the new active engine snapshots or complete encounter history and should not overwrite a 0.3.0 profile unchecked.
+3. If a release must be withdrawn, prefer rolling forward with a fix that understands profile schema 2 and engine snapshot schema 3. Versions before 0.4.0 do not understand the current active-run rules and stacked pickup semantics and should not overwrite a 0.4.0 profile unchecked. The original version-1 implementation is not a safe blind rollback either.
 4. A rollback build must preserve schema-2 permanent fields, reward ledger and paid costs, and explicitly discard only incompatible run state after explanation. Never deploy a migration that resets currency or converts a failed load into a new profile.
 5. Re-run save, settlement, interrupted-run and failure tests against the exact rollback candidate before release.

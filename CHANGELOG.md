@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.4.0 — playtest difficulty pass, September 29, 2026
+
+Implements the owner's stationary-play, oversized-evolution and early-full-build feedback. See [the difficulty audit](docs/difficulty-update-0.4.0.md) for measurements and limits.
+
+- Quadrupled all main/mini-boss health. Ordinary enemies scale continuously through the hunt; a new type enters every two minutes, including three new silhouettes. Faster brutes and warned ranged/ground attacks keep pressure in mixed waves.
+- Limited each hunt to one evolution. Reduced evolution damage/cooldown bonuses, shrank Meteor Storm and Void Sphere, and removed Void Sphere pulling completely.
+- Slowed later XP levels and limited ordinary chest rewards to one equipment rank plus gold. A normal-damage, survival-assisted probe completed its build at 30:01.52, with 48 of 78 equipment ranks at minute 17. This remains a human pacing target, not a guarantee.
+- Fixed pickup saturation: consolidate older matching pickups to free a slot for new loot at the kill location, preserving XP, gold and stacked consumables/chests. Queues remain bounded.
+- Made rituals require 60 shrine kills and at least 30 seconds survived within 45 seconds, with a smaller circle, mixed reinforcements and ground attacks. Reduced damage blessings to 10% and meat protection to half a second.
+- Preserved hostile warnings under visual-effect saturation; attacks wait if a complete warning cannot fit. Updated UI rules and corrected stale ritual completion text found in browser QA.
+- Added engine-snapshot-v3 migration, preserving permanent progress, XP-bar fraction, first earned evolution and live boss health percentage. Added 26 regressions; all 169 regular tests and the separate assisted full-run fixture pass.
+
+Eight normal-health bot cases produced seven defeats and one still-alive finale at the 31-minute horizon. No normal bot victory is claimed; the first-minute Knight result and broad balance remain playtest targets. Profile schema stays 2. Start a fresh hunt to assess the new pacing; permanent upgrades are retained.
+
 ## 0.3.0 — expanded boss encounters, September 29, 2026
 
 Local candidate; not deployed or certified. See [the boss update and verification](docs/boss-update-0.3.0.md).

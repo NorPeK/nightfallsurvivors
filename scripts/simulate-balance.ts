@@ -18,6 +18,8 @@ function positiveSetting(name: string, fallback: number) {
 const limit = positiveSetting("BALANCE_LIMIT", 1860);
 const cpuBudget = positiveSetting("BALANCE_CPU_BUDGET", 600);
 const wallBudget = positiveSetting("BALANCE_WALL_BUDGET", 900);
+const standAfter = process.env.BALANCE_STAND_AFTER === undefined ? null : positiveSetting("BALANCE_STAND_AFTER", 300);
+const survivalAssist = process.env.BALANCE_SURVIVAL_ASSIST === "1";
 const batchStart = performance.now(), batchCpu = process.cpuUsage();
 let resourceBudgetReached = false;
 const fingerprint = createHash("sha256");
@@ -38,15 +40,24 @@ function run(hunter: CharacterId, profile: typeof profiles[number], seed: number
   let options: UpgradeOption[] = [], result: RunStats | null = null;
   const input = new Input(); let movement={x:0,y:0}; input.getMove=()=>movement;
   const game = new Game(input,{onPhaseChange(){},onHud(){},onLevelUp(o){options=o},onChest(){},onBossWarning(){},onRunEnd(s){result=s},onEvolutionChoice(o){options=o},onCovenant(){}},{seed,autoStart:false});
-  game.setViewport(1000,600); game.startRun(hunter,statsFor(profile));
+  const stats = statsFor(profile);
+  if (survivalAssist) { stats.maxHp = 1e7; stats.regen = 0; stats.revives = 0; }
+  game.setViewport(1000,600); game.startRun(hunter,stats);
   const starter=CHARACTERS.find(c=>c.id===hunter)!.weapon;
   const weapons=[...new Set<WeaponId>([starter,"aura","frost","lightning","orb","fire","swordwave"])].slice(0,6);
   const passives=weapons.map(id=>WEAPONS[id].evolvesWith);
-  let nextDecision=0,firstUpgrade:number|null=null,firstEvolution:number|null=null,maxEnemies=0;
+  let nextDecision=0,firstUpgrade:number|null=null,firstEvolution:number|null=null,firstMaxBuild:number|null=null,maxEnemies=0;
+  const minuteSamples: { minute: number; level: number; equipmentRanks: number; evolutions: number; xpCollected: number; hp: number }[] = [];
+  let sampledMinute = -1;
   let nextSample=0,iterations=0,maxBullets=0,maxHostileBullets=0,maxPickups=0,peakRss=0,peakHeap=0;
   const start=performance.now(),startCpu=process.cpuUsage();
   console.error(`Starting ${hunter}/${profile}/seed${seed} to ${limit}s`);
   while(game.time<limit && !result) {
+    if (firstMaxBuild === null && game.weapons.length === 6 && game.passives.length === 6 && game.weapons.every(w => w.level === WEAPONS[w.id].maxLevel) && game.passives.every(p => p.level === 5)) firstMaxBuild = game.time;
+    if (Math.floor(game.time / 60) > sampledMinute) {
+      sampledMinute = Math.floor(game.time / 60);
+      minuteSamples.push({ minute: sampledMinute, level: game.level, equipmentRanks: game.weapons.reduce((n,w) => n+w.level,0)+game.passives.reduce((n,p) => n+p.level,0), evolutions: game.weapons.filter(w => w.evolved).length, xpCollected: Math.round(game.metrics.xpCollected), hp: +game.hp.toFixed(2) });
+    }
     if (++iterations % 300 === 0) {
       const cpu = process.cpuUsage(batchCpu);
       if ((cpu.user + cpu.system) / 1e6 >= cpuBudget || (performance.now()-batchStart) / 1000 >= wallBudget) { resourceBudgetReached=true;break; }
@@ -65,7 +76,8 @@ function run(hunter: CharacterId, profile: typeof profiles[number], seed: number
     if(game.phase==="covenant"){if(game.covenant?.status==="offered")game.declineCovenant();else game.chooseCovenant("precision");continue;}
     if(game.phase!=="playing")throw new Error(`Unexpected phase ${game.phase}`);
     if(game.weapons.some(w=>w.evolved))firstEvolution??=game.time;
-    if(game.time>=nextDecision){
+    if (standAfter !== null && game.time >= standAfter) movement = { x: 0, y: 0 };
+    else if(game.time>=nextDecision){
       nextDecision=game.time+.2;
       const enemies=game.enemies.filter(e=>e.active);maxEnemies=Math.max(maxEnemies,enemies.length);
       const near=enemies.filter(e=>Math.hypot(e.x-game.px,e.y-game.py)<330).sort((a,b)=>Math.hypot(a.x-game.px,a.y-game.py)-Math.hypot(b.x-game.px,b.y-game.py)).slice(0,35);
@@ -90,12 +102,12 @@ function run(hunter: CharacterId, profile: typeof profiles[number], seed: number
   const end = result as RunStats|null;
   const cpu=process.cpuUsage(startCpu);
   const row={hunter,profile,seed,outcome:end?(end.won?"victory":"defeat"):resourceBudgetReached?"resource-budget":"horizon",time:+game.time.toFixed(2),won:end?.won??false,timeout:!end,level:game.level,kills:game.kills,gold:+game.runGold.toFixed(2),firstUpgrade:firstUpgrade===null?null:+firstUpgrade.toFixed(2),firstEvolution:firstEvolution===null?null:+firstEvolution.toFixed(2),bosses:game.metrics.bossesDefeated,miniBosses:game.metrics.miniBossesDefeated,mainBossesSpawned:[...game.bossesSpawned],miniBossesSpawned:[...game.miniBossesSpawned],maxEnemies,build:game.weapons.map(w=>`${w.id}:${w.level}${w.evolved?"E":""}`),passives:game.passives.map(p=>`${p.id}:${p.level}`),damageByWeapon:game.metrics.damageByWeapon,damageTaken:+game.metrics.damageTaken.toFixed(2),cause:end?.cause??null,hp:+game.hp.toFixed(2),revivesRemaining:game.stats.revives,elites:game.eliteSpawned.size,swarms:game.swarmSpawned.size,sampledMaxBullets:maxBullets,sampledMaxHostileBullets:maxHostileBullets,sampledMaxPickups:maxPickups,sampledPeakRssMiB:+(peakRss/1048576).toFixed(2),sampledPeakHeapMiB:+(peakHeap/1048576).toFixed(2),cpuSeconds:+((cpu.user+cpu.system)/1e6).toFixed(3),wallSeconds:+((performance.now()-start)/1000).toFixed(2)};
-  game.dispose();return row;
+  game.dispose();return { ...row, standAfter, survivalAssist, firstMaxBuild: firstMaxBuild === null ? null : +firstMaxBuild.toFixed(2), minuteSamples };
 }
 const runs = seeds.flatMap(seed=>profiles.flatMap(profile=>CHARACTERS.map(hunter=>({seed,profile,hunter:hunter.id})))).filter(r=>(!selectedHunters||selectedHunters.includes(r.hunter))&&(!selectedProfiles||selectedProfiles.includes(r.profile)));
 if (!runs.length) throw new Error("No matching seed/profile/hunter trials");
-console.log(JSON.stringify({metadata:true,label:process.env.BALANCE_LABEL??"sept29-current",sourceHash,node:process.version,limit,cpuBudget,wallBudget,requestedRuns:runs.length,policy:"Unchanged deterministic greedy bot; all Covenants declined; no rerolls/skips/banishes; no invulnerability or time skips. Memory/pool counts sampled every30 simulated seconds."}));
+console.log(JSON.stringify({metadata:true,label:process.env.BALANCE_LABEL??"sept29-current",sourceHash,node:process.version,limit,cpuBudget,wallBudget,standAfter,survivalAssist,requestedRuns:runs.length,policy:`Deterministic greedy bot${standAfter === null ? "" : `; stops moving after ${standAfter}s`}; all Covenants declined; no rerolls/skips/banishes; ${survivalAssist ? "huge-HP survival assistance for progression measurement, normal weapon damage" : "normal HP and damage"}; no time skips. Memory/pool counts sampled every30 simulated seconds.`}));
 const rows=[];
 for(const trial of runs){const row=run(trial.hunter,trial.profile,trial.seed);rows.push(row);console.log(JSON.stringify(row));if(resourceBudgetReached)break;}
 const totalCpu=process.cpuUsage(batchCpu);
-console.log(JSON.stringify({summary:true,runs:rows.length,requestedRuns:runs.length,wins:rows.filter(r=>r.outcome==="victory").length,defeats:rows.filter(r=>r.outcome==="defeat").length,horizons:rows.filter(r=>r.outcome==="horizon").length,resourceBudgetReached,cpuSeconds:+((totalCpu.user+totalCpu.system)/1e6).toFixed(3),wallSeconds:+((performance.now()-batchStart)/1000).toFixed(2),note:"Legal builds/progression. Deterministic greedy bot; does not establish human balance or browser/device performance."}));
+console.log(JSON.stringify({summary:true,runs:rows.length,requestedRuns:runs.length,wins:rows.filter(r=>r.outcome==="victory").length,defeats:rows.filter(r=>r.outcome==="defeat").length,horizons:rows.filter(r=>r.outcome==="horizon").length,resourceBudgetReached,cpuSeconds:+((totalCpu.user+totalCpu.system)/1e6).toFixed(3),wallSeconds:+((performance.now()-batchStart)/1000).toFixed(2),note:`Legal equipment choices${survivalAssist ? "; huge HP assists survival only" : ""}. Deterministic greedy bot; does not establish human balance or browser/device performance.`}));

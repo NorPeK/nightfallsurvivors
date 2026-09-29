@@ -2,6 +2,7 @@
 // procedural gothic ground props, dynamic lights, particles and FX.
 
 import type { Game } from "./engine";
+import { COVENANT_RADIUS } from "./rules";
 import {
   enemySprite,
   enemyFlashSprite,
@@ -407,7 +408,7 @@ export function renderGame(g: Game, ctx: CanvasRenderingContext2D, screenW: numb
     const c = g.covenant;
     ctx.save(); ctx.strokeStyle = "#cdb5f1"; ctx.lineWidth = 3;
     ctx.fillStyle = "rgba(144,105,210,0.055)";
-    ctx.setLineDash([12, 10]); ctx.beginPath(); ctx.arc(c.x + ox, c.y + oy, 300, 0, TAU); ctx.fill(); ctx.stroke();
+    ctx.setLineDash([12, 10]); ctx.beginPath(); ctx.arc(c.x + ox, c.y + oy, COVENANT_RADIUS, 0, TAU); ctx.fill(); ctx.stroke();
     ctx.setLineDash([]); ctx.fillStyle = "#eddbff"; ctx.font = "600 16px Georgia, serif"; ctx.textAlign = "center";
     ctx.fillText("✧", c.x + ox, c.y + oy); ctx.restore();
   }

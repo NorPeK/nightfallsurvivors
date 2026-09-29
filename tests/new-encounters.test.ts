@@ -103,10 +103,10 @@ test("all added main bosses announce a delayed attack that dies with its owner",
   }
 });
 
-test("version 2 checkpoints retain a live mini-boss and its warned attack", () => {
+test("current checkpoints retain a live mini-boss and its warned attack", () => {
   const { game, access } = fixture(); const enemy = game.spawnMiniBoss(MINI_BOSSES.find((mini) => mini.pattern === "volley")!)!;
   Object.assign(enemy, { x: 220, y: 0, attackTimer: 0 }); access.updateEnemies(.01);
-  const snapshot = game.exportSnapshot()!; assert.equal(snapshot.version, 2);
+  const snapshot = game.exportSnapshot()!; assert.equal(snapshot.version, 3);
   const restored = fixture(); assert.equal(restored.game.importSnapshot(snapshot), true);
   assert.deepEqual([...restored.game.miniBossesSpawned], [...game.miniBossesSpawned]);
   assert.equal(restored.game.enemies.find((other) => other.active)!.miniBossId, enemy.miniBossId);
@@ -125,7 +125,7 @@ test("legacy checkpoints skip historical added encounters without inventing defe
   assert.deepEqual([...restored.game.bossesSpawned], ["colossus", "bloodwarden"]);
   assert.deepEqual(restored.game.metrics.bossesDefeated, []); assert.deepEqual(restored.game.metrics.miniBossesDefeated, []);
   assert.equal(restored.game.enemies.find((enemy) => enemy.active)!.miniBossId, null);
-  assert.equal(restored.game.exportSnapshot()!.version, 2);
+  assert.equal(restored.game.exportSnapshot()!.version, 3);
 });
 
 test("restored mini identities and projectile counts are bounded", () => {
