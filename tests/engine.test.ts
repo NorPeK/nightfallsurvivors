@@ -1,8 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { Game, type Enemy, type Callbacks } from "../app/game/engine";
+import { Game, type Enemy, type Callbacks, type GameSnapshot } from "../app/game/engine";
 import { Input } from "../app/game/input";
-import { BASE_STATS, BOSSES, ENEMIES } from "../app/game/data";
+import { BASE_STATS, BOSSES, ENEMIES, WEAPONS, PASSIVES, xpForLevel } from "../app/game/data";
 import type { RunStats, UpgradeOption } from "../app/game/types";
 
 type FixtureAccess = {
@@ -301,4 +301,89 @@ test("authored swarm delivery waits for room for the full ring",()=>{
   const {game,access}=setup();game.time=209;game.eliteSpawned.add(2);
   for(let i=0;i<400;i++)enemy(game,1000+i,0);access.updateSpawning(.1,game.time);assert.equal(game.swarmSpawned.has(3),false);
   for(let i=0;i<40;i++)game.enemies[i].active=false;access.updateSpawning(.1,game.time);assert.equal(game.swarmSpawned.has(3),true);assert.equal(game.enemies.filter(e=>e.active).length,400);
+});
+
+test("Growth applies once to both ordinary-enemy and boss XP drops",()=>{
+  const total=(boss:boolean,xpGain:number)=>{
+    const {game}=setup();game.startRun('knight',{...BASE_STATS,xpGain,critChance:0});
+    if(boss){game.spawnBoss(BOSSES[0]);game.hitBoss(1e9,false);}else{const e=enemy(game,100,0,1);game.hitEnemy(e,1e9,false,0,0);}
+    return game.pickups.filter(p=>p.active&&p.kind==='gem').reduce((sum,p)=>sum+p.value,0);
+  };
+  assert.equal(total(true,1.25),210);assert.equal(total(true,1.25),total(true,1)*1.25);
+  assert.equal(total(false,1.25),total(false,1)*1.25);
+});
+
+test("weaker slow effects neither thaw frozen enemies nor extend the freeze",()=>{
+  const {game,access}=setup();game.startRun('mage',{...BASE_STATS,critChance:0});const e=enemy(game,50,0);e.slowT=.5;e.slowF=0;access.buildGrid();game.weapons=[{id:'orb',level:1,evolved:false,timer:0,alt:0}];
+  for(let i=0;i<4;i++){game.weapons[0].timer=0;access.updateWeapons(.001);}
+  assert.equal(e.slowF,0);assert.equal(e.slowT,.5);
+  game.hitEnemy(e,1,false,0,0,{slow:2.4,slowF:.55});assert.equal(e.slowF,0);assert.equal(e.slowT,.5);
+  e.slowF=.55;e.slowT=2.4;game.hitEnemy(e,1,false,0,0,{slow:.7,slowF:0});assert.equal(e.slowT,.7);
+});
+
+test("nonpiercing swept projectiles hit the nearest surface in either direction",()=>{
+  for(const direction of [-1,1]){
+    const {game,access}=setup();const near=enemy(game,90*direction,0),far=enemy(game,0,0);near.radius=far.radius=10;access.buildGrid();
+    game.spawnBullet('arrow',130*direction,0,-2400*direction,0,10,5,0,1,false,0);access.updateBullets(.075);
+    assert.equal(near.hp,990);assert.equal(far.hp,1000);
+  }
+});
+
+test("a boss and ordinary targets share the same projectile contact order",()=>{
+  const {game,access}=setup();game.spawnBoss(BOSSES[0]);Object.assign(game.boss!,{x:90,y:0,hp:1000,maxHp:1000});const far=enemy(game,0,0);far.radius=10;access.buildGrid();
+  game.spawnBullet('arrow',160,0,-2400,0,10,5,0,1,false,0);access.updateBullets(.08);
+  assert.equal(game.boss!.hp,990);assert.equal(far.hp,1000);
+});
+
+test("fireballs explode at the swept impact point instead of the far endpoint",()=>{
+  const {game,access}=setup();const e=enemy(game,90,0);e.radius=10;access.buildGrid();
+  game.spawnBullet('fireball',160,0,-2400,0,10,5,0,1,false,20);access.updateBullets(.08);assert.equal(e.hp,990);
+  const fx=game.fx.find(f=>f.kind==='explosion')!;assert.equal(fx.x,105);
+});
+
+test("orb pulls cannot leave later projectile queries behind a stale grid cell",()=>{
+  const {game,access}=setup();const e=enemy(game,146,0);e.radius=45.6;access.buildGrid();
+  for(let i=0;i<12;i++)game.spawnBullet('orb',86,0,0,0,1,1,999,1,true,150);
+  game.spawnBullet('arrow',86,0,0,0,10,5,0,1,false,0);access.updateBullets(1/120);
+  assert.ok(Math.abs(e.x-136.5)<1e-8);assert.equal(e.hp,990);
+});
+
+test("Hunter's Oath grants its first-hit bonus against full-health bosses",()=>{
+  const {game}=setup();game.covenant={status:'complete',x:0,y:0,remaining:0,progress:12,target:12,reward:'precision'};game.spawnBoss(BOSSES[0]);
+  const hp=game.boss!.hp;game.hitBoss(10,false);assert.equal(game.boss!.hp,hp-12);game.hitBoss(10,false);assert.equal(game.boss!.hp,hp-22);
+});
+
+test("saved drafts reject impossible slots, ranks, ownership and evolution readiness atomically",()=>{
+  const {game}=setup();const before=game.runId;
+  const option=(id:string,kind:'weapon'|'passive'|'evolution',level=1,isNew=true):UpgradeOption=>{
+    const def=kind==='passive'?PASSIVES[id]:WEAPONS[id];return{kind,id,name:def.name,icon:def.icon,color:def.color,level,maxLevel:def.maxLevel,isNew,desc:def.desc};
+  };
+  const make=()=>{const s=game.exportSnapshot()!;s.phase='levelup';s.weapons=[{id:'bow',level:1,evolved:false,timer:0,alt:0}];s.currentDraft=[option('bow','weapon',2,false)];return s;};
+  const cases:((s:GameSnapshot)=>void)[]=[
+    s=>{s.weapons=(['bow','orb','lightning','frost','fire','aura'] as const).map(id=>({id,level:1,evolved:false,timer:0,alt:0}));s.currentDraft=[option('daggers','weapon')];},
+    s=>{s.currentDraft=[option('bow','weapon',3,false)];},
+    s=>{s.currentDraft=[option('bow','weapon',1,true)];},
+    s=>{s.currentDraft=[option('orb','weapon',1,false)];},
+    s=>{s.weapons[0].level=8;s.currentDraft=[option('bow','weapon',8,false)];},
+    s=>{s.weapons[0].level=7;s.weapons[0].evolved=true;s.currentDraft=[option('bow','weapon',8,false)];},
+    s=>{s.passives=(['might','tome','boots','eagle','crystal','heart'] as const).map(id=>({id,level:1}));s.currentDraft=[option('magnet','passive')];},
+    s=>{s.passives=[{id:'heart',level:1}];s.currentDraft=[option('heart','passive',3,false)];},
+    s=>{s.phase='evolution';s.weapons[0].level=8;s.currentDraft=[option('bow','evolution',8)];},
+    s=>{s.phase='evolution';s.weapons[0].level=8;s.weapons[0].evolved=true;s.passives=[{id:'eagle',level:1}];s.currentDraft=[option('bow','evolution',8)];},
+  ];
+  for(const corrupt of cases){const s=make();corrupt(s);assert.equal(game.importSnapshot(s),false);assert.equal(game.runId,before);}
+  assert.equal(game.importSnapshot(make()),true);
+});
+
+test("live stale draft actions cannot exceed slots or evolve an ineligible weapon",()=>{
+  const {game,access}=setup();game.weapons=(['bow','orb','lightning','frost','fire','aura'] as const).map(id=>({id,level:1,evolved:false,timer:0,alt:0}));
+  const def=WEAPONS.daggers;const option:UpgradeOption={kind:'weapon',id:def.id,name:def.name,icon:def.icon,color:def.color,level:1,maxLevel:8,isNew:true,desc:def.desc};
+  game.phase='levelup';access.currentDraft=[option];game.applyUpgrade(option);assert.equal(game.weapons.length,6);assert.equal(game.phase,'levelup');
+  game.phase='evolution';access.currentDraft=[{...option,kind:'evolution',id:'bow',level:8}];assert.equal(game.chooseEvolution('bow'),false);assert.equal(game.weapons[0].evolved,false);
+});
+
+test("full-build QA fixtures use late-run XP cadence but explicit draft presets still open",()=>{
+  const {game}=setup();game.debug=true;game.debugScenario({minute:27,density:0,fullBuild:true,invulnerable:true});
+  assert.equal(game.level,80);assert.equal(game.xp,0);assert.equal(game.xpNext,xpForLevel(80));
+  game.debugScenario({minute:27,density:0,fullBuild:true,invulnerable:true,phase:'levelup'});assert.equal(game.phase,'levelup');assert.equal(game.level,81);
 });

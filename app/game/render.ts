@@ -366,6 +366,7 @@ export function renderGame(g: Game, ctx: CanvasRenderingContext2D, screenW: numb
   ctx.save();
   ctx.scale(viewport.scale, viewport.scale);
   const now = g.time;
+  const calmEffects = settings.reducedMotion || !settings.screenFlash;
   // camera with shake
   const shx = settings.screenShake && !settings.reducedMotion ? Math.sin(now * 97) * g.shake * 7 : 0;
   const shy = settings.screenShake && !settings.reducedMotion ? Math.cos(now * 113) * g.shake * 7 : 0;
@@ -393,7 +394,7 @@ export function renderGame(g: Game, ctx: CanvasRenderingContext2D, screenW: numb
   for (let cx = pc0x; cx <= pc1x; cx++) {
     for (let cy = pc0y; cy <= pc1y; cy++) {
       for (const p of propsForCell(cx, cy)) {
-        drawProp(ctx, p, cx * PROP_CELL + p.ox + ox, cy * PROP_CELL + p.oy + oy, now);
+        drawProp(ctx, p, cx * PROP_CELL + p.ox + ox, cy * PROP_CELL + p.oy + oy, calmEffects ? 0 : now);
       }
     }
   }
@@ -457,7 +458,7 @@ export function renderGame(g: Game, ctx: CanvasRenderingContext2D, screenW: numb
   if (auraW) {
     const L = g.levelStats(auraW);
     const r = 92 * g.stats.area * L.area * (auraW.evolved ? 1.6 : 1);
-    const pulse = 1 + Math.sin(now * 5) * 0.025;
+    const pulse = calmEffects ? 1 : 1 + Math.sin(now * 5) * 0.025;
     const gx = g.px + ox;
     const gy = g.py + oy;
     const grad = ctx.createRadialGradient(gx, gy, r * 0.4, gx, gy, r * pulse);
@@ -471,7 +472,7 @@ export function renderGame(g: Game, ctx: CanvasRenderingContext2D, screenW: numb
     ctx.strokeStyle = auraW.evolved ? "rgba(255,220,140,0.5)" : "rgba(255,233,168,0.32)";
     ctx.lineWidth = 2;
     ctx.setLineDash([10, 14]);
-    ctx.lineDashOffset = -now * 40;
+    ctx.lineDashOffset = settings.reducedMotion ? 0 : -now * 40;
     ctx.beginPath();
     ctx.arc(gx, gy, r * pulse, 0, TAU);
     ctx.stroke();
@@ -510,17 +511,19 @@ export function renderGame(g: Game, ctx: CanvasRenderingContext2D, screenW: numb
     const y = e.y + oy;
     if (x < -60 || x > W + 60 || y < -60 || y > H + 60) continue;
     const frozen = e.slowT > 0 && e.slowF === 0;
-    const spr =
-      e.hitFlash > 0 && settings.screenFlash && !settings.reducedMotion
-        ? enemyFlashSprite(e.def, e.elite)
-        : frozen
-          ? enemyFrozenSprite(e.def, e.elite)
-          : enemySprite(e.def, e.elite);
+    const spr = frozen ? enemyFrozenSprite(e.def, e.elite) : enemySprite(e.def, e.elite);
     const bob = 1 + Math.sin(e.wobble) * 0.05;
     ctx.save();
     ctx.translate(x, y);
     ctx.scale(e.faceX < 0 ? -bob : bob, 2 - bob);
     ctx.drawImage(spr, -spr.width / 2, -spr.height / 2);
+    if (e.hitFlash > 0 && settings.screenFlash && !settings.reducedMotion) {
+      // Frequent area hits must not turn the horde into an opaque white wall.
+      const flash = enemyFlashSprite(e.def, e.elite);
+      ctx.globalAlpha = 0.28;
+      ctx.drawImage(flash, -flash.width / 2, -flash.height / 2);
+      ctx.globalAlpha = 1;
+    }
     if (!frozen && e.slowT > 0 && e.hitFlash <= 0) {
       // chilled (not frozen): light ice tint
       ctx.globalAlpha = 0.4;
@@ -750,7 +753,7 @@ export function renderGame(g: Game, ctx: CanvasRenderingContext2D, screenW: numb
         ctx.globalAlpha = 1 - k;
         const r = f.radius * (0.6 + k * 0.4);
         ctx.shadowColor = f.color;
-        ctx.shadowBlur = 14;
+        ctx.shadowBlur = calmEffects ? 0 : 14;
         ctx.strokeStyle = f.color;
         ctx.lineWidth = 9 * (1 - k * 0.5);
         ctx.lineCap = "round";
@@ -758,7 +761,7 @@ export function renderGame(g: Game, ctx: CanvasRenderingContext2D, screenW: numb
         ctx.arc(0, 0, r, -f.arc / 2, f.arc / 2);
         ctx.stroke();
         ctx.lineWidth = 3;
-        ctx.strokeStyle = "rgba(255,255,255,0.85)";
+        ctx.strokeStyle = calmEffects ? f.color : "rgba(255,255,255,0.85)";
         ctx.beginPath();
         ctx.arc(0, 0, r * 0.92, -f.arc / 2.4, f.arc / 2.4);
         ctx.stroke();
@@ -771,12 +774,12 @@ export function renderGame(g: Game, ctx: CanvasRenderingContext2D, screenW: numb
         ctx.globalAlpha = 1 - k;
         ctx.strokeStyle = f.color;
         ctx.shadowColor = f.color;
-        ctx.shadowBlur = 16;
+        ctx.shadowBlur = calmEffects ? 0 : 16;
         ctx.lineWidth = f.kind === "nova" ? 7 : 4;
         ctx.beginPath();
         ctx.arc(x, y, f.radius * k, 0, TAU);
         ctx.stroke();
-        if (f.kind === "nova") {
+        if (f.kind === "nova" && !calmEffects) {
           ctx.globalAlpha = (1 - k) * 0.25;
           ctx.fillStyle = f.color;
           ctx.beginPath();
@@ -789,9 +792,9 @@ export function renderGame(g: Game, ctx: CanvasRenderingContext2D, screenW: numb
       case "bolt": {
         ctx.save();
         ctx.globalAlpha = 1 - k;
-        ctx.strokeStyle = "#cdf2ff";
+        ctx.strokeStyle = calmEffects ? f.color : "#cdf2ff";
         ctx.shadowColor = f.color;
-        ctx.shadowBlur = 16;
+        ctx.shadowBlur = calmEffects ? 0 : 16;
         ctx.lineWidth = 3.2;
         ctx.beginPath();
         // jagged bolt from (x2,y2) to (x,y)
@@ -801,23 +804,30 @@ export function renderGame(g: Game, ctx: CanvasRenderingContext2D, screenW: numb
         const segs = 5;
         for (let i = 1; i <= segs; i++) {
           const tt = i / segs;
-          const jx = (f.x - f.x2) * tt + (i < segs ? (hash2(i * 31, Math.floor(g.time * 30)) - 0.5) * 34 : 0);
+          const jx = (f.x - f.x2) * tt + (i < segs ? (hash2(i * 31, calmEffects ? 0 : Math.floor(g.time * 30)) - 0.5) * 34 : 0);
           const jy = (f.y - f.y2) * tt;
           ctx.lineTo(f.x2 + jx + ox, f.y2 + jy + oy);
         }
         ctx.stroke();
         // impact glow
-        ctx.fillStyle = f.color;
-        ctx.globalAlpha = (1 - k) * 0.5;
-        ctx.beginPath();
-        ctx.arc(x, y, f.radius * 0.55, 0, TAU);
-        ctx.fill();
+        if (!calmEffects) {
+          ctx.fillStyle = f.color;
+          ctx.globalAlpha = (1 - k) * 0.5;
+          ctx.beginPath();
+          ctx.arc(x, y, f.radius * 0.55, 0, TAU);
+          ctx.fill();
+        }
         ctx.restore();
         break;
       }
       case "explosion": {
         ctx.save();
         ctx.globalAlpha = 1 - k;
+        if (calmEffects) {
+          ctx.strokeStyle = f.color; ctx.lineWidth = 2;
+          ctx.beginPath(); ctx.arc(x, y, f.radius, 0, TAU); ctx.stroke(); ctx.restore();
+          break;
+        }
         const grad = ctx.createRadialGradient(x, y, 1, x, y, f.radius * (0.4 + k * 0.6));
         grad.addColorStop(0, "rgba(255,243,201,0.9)");
         grad.addColorStop(0.4, "rgba(255,159,91,0.7)");
@@ -842,8 +852,9 @@ export function renderGame(g: Game, ctx: CanvasRenderingContext2D, screenW: numb
         ctx.stroke();
         ctx.beginPath();
         for (let i = 0; i < 5; i++) {
-          const a = (i / 5) * TAU + now * 2 + (i % 2 ? Math.PI : 0);
-          const a2 = (((i + 2) % 5) / 5) * TAU + now * 2 + ((i + 2) % 2 ? Math.PI : 0);
+          const rotation = settings.reducedMotion ? 0 : now * 2;
+          const a = (i / 5) * TAU + rotation + (i % 2 ? Math.PI : 0);
+          const a2 = (((i + 2) % 5) / 5) * TAU + rotation + ((i + 2) % 2 ? Math.PI : 0);
           const rr = f.radius * (0.5 + k * 0.5);
           ctx.moveTo(x + Math.cos(a) * rr, y + Math.sin(a) * rr);
           ctx.lineTo(x + Math.cos(a2) * rr, y + Math.sin(a2) * rr);
@@ -922,9 +933,13 @@ export function renderGame(g: Game, ctx: CanvasRenderingContext2D, screenW: numb
     ctx.stroke(); ctx.restore();
   }
   // A stable locator is deliberately drawn after friendly spell effects.
-  ctx.strokeStyle = settings.highContrast ? "#ffffff" : "rgba(255,240,188,0.75)";
+  ctx.beginPath(); ctx.ellipse(g.px + ox, g.py + oy + 15, 16, 7, 0, 0, TAU);
+  ctx.strokeStyle = "#080910";
+  ctx.lineWidth = settings.highContrast ? 7 : 5;
+  ctx.stroke();
+  ctx.strokeStyle = settings.highContrast ? "#ffffff" : "#fff0bc";
   ctx.lineWidth = settings.highContrast ? 3 : 1.5;
-  ctx.beginPath(); ctx.ellipse(g.px + ox, g.py + oy + 15, 16, 7, 0, 0, TAU); ctx.stroke();
+  ctx.stroke();
   ctx.restore();
 
   drawObjectiveMarkers(ctx, offscreenMarkers(g, screenW, screenH, settings), settings.highContrast);

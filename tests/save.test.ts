@@ -233,7 +233,8 @@ test("an unreadable primary cannot authorize backup recovery", async () => {
   let writes = 0;
   const repository = createProfileRepository({ async loadData() { throw new Error("offline"); },
     async loadBackup() { return '{"gold":50,"upgrades":{}}'; }, async saveData() { writes++; } });
-  await repository.load();
+  const result = await repository.load();
+  assert.equal(result.backup, undefined, "failed primary reads must not offer an unusable recovery action");
   assert.equal((await repository.recoverBackup()).status, "error"); assert.equal(writes, 0);
 });
 
@@ -424,4 +425,87 @@ test("another writer's data is preserved and saving stops until reloaded", async
   assert.equal(repository.getStatus(), "conflict"); assert.equal(memory.writes.length, 0);
   const reloaded = await repository.load();
   assert.equal(reloaded.profile?.gold, 500);
+});
+
+test("malformed snapshot timestamps discard the run without invalidating permanent progress", async () => {
+  const profile = beginRun(createDefaultProfile(), "run-1", "knight");
+  profile.gold = 321;
+  for (const savedAt of [-1, "yesterday", null, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
+    const raw = JSON.stringify({ ...profile, activeRun: { version: 1, runId: "run-1", savedAt, state: { runId: "run-1", charId: "knight" } } });
+    const repository = createProfileRepository(memoryStorage(raw).storage);
+    const loaded = await repository.load();
+    assert.equal(loaded.status, "ready"); assert.equal(loaded.profile?.gold, 321);
+    assert.equal(loaded.profile?.activeRun, null); assert.match(loaded.warning ?? "", /cannot be resumed/);
+  }
+});
+
+test("a conflict between read and write locks every coalesced caller until explicit reload", async () => {
+  const memory = memoryStorage();
+  let entered!: () => void, release!: () => void;
+  const began = new Promise<void>(resolve => { entered = resolve; });
+  const held = new Promise<void>(resolve => { release = resolve; });
+  memory.storage.saveData = async () => {
+    entered(); await held;
+    memory.replace(JSON.stringify({ gold: 999, upgrades: {} }));
+    const error = new Error("Another window changed progress"); error.name = "SaveConflictError"; throw error;
+  };
+  const repository = createProfileRepository(memory.storage);
+  const initial = (await repository.load()).profile!;
+  const first = updateSettings(initial, { musicVolume: 0.2 });
+  const firstSave = repository.save(first);
+  const firstRejected = assert.rejects(firstSave, { name: "SaveConflictError" });
+  await began;
+  const latest = updateSettings(first, { musicVolume: 0.3 });
+  const latestSave = repository.save(latest);
+  const latestRejected = assert.rejects(latestSave, SaveConflictError);
+  release(); await Promise.all([firstRejected, latestRejected]);
+  assert.equal(repository.getStatus(), "conflict");
+  await assert.rejects(repository.save(updateSettings(latest, { musicVolume: 0.4 })), SaveConflictError);
+  assert.equal((await repository.load()).profile?.gold, 999, "reload must read the other writer, not return the cached profile");
+});
+
+test("a lost write acknowledgement does not turn the next queued revision into a false conflict", async () => {
+  const memory = memoryStorage(); const write = memory.storage.saveData;
+  let entered!: () => void, release!: () => void;
+  const began = new Promise<void>(resolve => { entered = resolve; });
+  const held = new Promise<void>(resolve => { release = resolve; });
+  let first = true;
+  memory.storage.saveData = async raw => {
+    await write(raw);
+    if (first) { first = false; entered(); await held; throw new Error("Acknowledgement lost"); }
+  };
+  const repository = createProfileRepository(memory.storage);
+  const earlier = updateSettings((await repository.load()).profile!, { musicVolume: 0.2 });
+  const saveEarlier = repository.save(earlier);
+  const failure = assert.rejects(saveEarlier, /Acknowledgement lost/); await began;
+  const latest = updateSettings(earlier, { musicVolume: 0.7 });
+  const saveLatest = repository.save(latest);
+  release(); await failure; await saveLatest;
+  assert.equal(repository.getStatus(), "ready");
+  assert.equal(parseProfile(memory.read()!).settings.musicVolume, 0.7);
+  assert.equal(memory.writes.length, 2); await repository.flush();
+});
+
+test("an externally deleted primary is a conflict, not an acknowledged empty save", async () => {
+  const memory = memoryStorage('{"gold":500,"upgrades":{}}');
+  const repository = createProfileRepository(memory.storage);
+  const profile = (await repository.load()).profile!;
+  memory.replace(null);
+  await assert.rejects(repository.save(updateSettings(profile, { highContrast: true })), SaveConflictError);
+  assert.equal(repository.getStatus(), "conflict"); assert.equal(memory.writes.length, 0);
+});
+
+test("a lost pause-checkpoint acknowledgement can be reconciled on the next normal save", async () => {
+  const memory = memoryStorage(); const write = memory.storage.saveData;
+  memory.storage.saveData = async (raw, options) => {
+    await write(raw);
+    if (options?.pauseCheckpoint) throw new Error("Pause checkpoint acknowledgement lost");
+  };
+  const repository = createProfileRepository(memory.storage);
+  const checkpoint = updateSettings((await repository.load()).profile!, { musicVolume: 0.2 });
+  await assert.rejects(repository.saveOnPause(checkpoint), /acknowledgement lost/);
+  await repository.save(updateSettings(checkpoint, { musicVolume: 0.8 }));
+  assert.equal(repository.getStatus(), "ready");
+  assert.equal(parseProfile(memory.read()!).settings.musicVolume, 0.8);
+  await repository.flush();
 });

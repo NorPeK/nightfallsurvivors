@@ -5,6 +5,7 @@ import { Input } from "../app/game/input";
 import { BASE_STATS, BOSSES, ENEMIES } from "../app/game/data";
 import { DEFAULT_SETTINGS } from "../app/game/settings";
 import { combatViewport, offscreenMarkers, renderGame } from "../app/game/render";
+import { enemySprite, enemyFrozenSprite, enemyFlashSprite } from "../app/game/sprites";
 
 type Command = { name: string; args: unknown[] };
 function canvasContext(commands: Command[] = []): CanvasRenderingContext2D {
@@ -12,7 +13,7 @@ function canvasContext(commands: Command[] = []): CanvasRenderingContext2D {
   return new Proxy(values, {
     get(target, name: string) {
       if (name in target) return target[name];
-      if (name === "createLinearGradient" || name === "createRadialGradient") return () => ({ addColorStop() {} });
+      if (name === "createLinearGradient" || name === "createRadialGradient") return (...args: unknown[]) => { commands.push({ name, args }); return { addColorStop(...stop: unknown[]) { commands.push({ name: "addColorStop", args: stop }); } }; };
       return (...args: unknown[]) => { commands.push({ name, args }); };
     },
     set(target, name: string, value) { target[name] = value; commands.push({ name: `set:${name}`, args: [value] }); return true; },
@@ -127,6 +128,50 @@ test("comfort settings steady danger rims while retaining the countdown boundary
       assert.ok(commands.some(c => c.name === "set:strokeStyle" && c.args[0] === "rgba(255,140,60,0.8)"));
       assert.ok(commands.some(c => c.name === "arc" && c.args[2] === 60), "half-time countdown remains readable");
       if (preferences.reducedMotion) assert.ok(commands.every(c => c.name !== "set:lineDashOffset" || c.args[0] === 0));
+    }
+  } finally { f.cleanup(); }
+});
+
+test("comfort controls replace bright impact fills with geometry and stop decorative aura rotation", () => {
+  const f = fixture(); try {
+    const { game } = f;
+    game.time = 20;
+    game.weapons.push({ id: "aura", level: 1, evolved: false, timer: 0, alt: 0 });
+    game.fx = [{ kind: "explosion", shape: "circle", x: 0, y: 0, x2: 0, y2: 0, angle: 0, radius: 123, t: .1, dur: .7, color: "#ff8f50", arc: 0 }];
+    for (const preferences of [{ screenFlash: false, reducedMotion: false }, { screenFlash: true, reducedMotion: true }]) {
+      const commands: Command[] = [];
+      renderGame(game, canvasContext(commands), 390, 844, { ...DEFAULT_SETTINGS, ...preferences });
+      assert.ok(commands.some(c => c.name === "arc" && c.args[2] === 123), "impact boundary still communicates its full radius");
+      assert.ok(!commands.some(c => c.name === "addColorStop" && c.args[1] === "rgba(255,243,201,0.9)"), "bright explosion fill is absent");
+      if (preferences.reducedMotion) assert.ok(commands.every(c => c.name !== "set:lineDashOffset" || c.args[0] === 0));
+    }
+  } finally { f.cleanup(); }
+});
+
+test("enemy hits retain normal or frozen artwork under a restrained flash without mutating gameplay", () => {
+  const f = fixture(); try {
+    const { game } = f;
+    const enemy = game.spawnEnemy(ENEMIES.ghoul, false)!;
+    Object.assign(enemy, { x: 0, y: 0, hitFlash: .15 });
+    for (const frozen of [false, true]) {
+      Object.assign(enemy, { slowT: frozen ? 2 : 0, slowF: frozen ? 0 : 1 });
+      const base = frozen ? enemyFrozenSprite(enemy.def, false) : enemySprite(enemy.def, false);
+      const flash = enemyFlashSprite(enemy.def, false);
+      const before = JSON.stringify(game.exportSnapshot());
+      for (const preferences of [{ screenFlash: true, reducedMotion: false }, { screenFlash: false, reducedMotion: false }, { screenFlash: true, reducedMotion: true }]) {
+        const commands: Command[] = [];
+        renderGame(game, canvasContext(commands), 390, 844, { ...DEFAULT_SETTINGS, ...preferences });
+        const basePaint = commands.findIndex(c => c.name === "drawImage" && c.args[0] === base);
+        const flashPaint = commands.findIndex(c => c.name === "drawImage" && c.args[0] === flash);
+        assert.ok(basePaint >= 0, "readable enemy artwork is always painted");
+        if (preferences.screenFlash && !preferences.reducedMotion) {
+          assert.ok(flashPaint > basePaint, "hit feedback overlays, rather than replaces, the enemy");
+          const alpha = commands.slice(0, flashPaint).findLast(c => c.name === "set:globalAlpha")?.args[0];
+          assert.ok(typeof alpha === "number" && alpha > 0 && alpha <= .3, "the flash cannot obscure most of the underlying artwork");
+          assert.deepEqual(commands[flashPaint + 1], { name: "set:globalAlpha", args: [1] }, "subsequent world rendering returns to opaque");
+        } else assert.equal(flashPaint, -1, "comfort preferences suppress the flash overlay");
+        assert.equal(JSON.stringify(game.exportSnapshot()), before);
+      }
     }
   } finally { f.cleanup(); }
 });

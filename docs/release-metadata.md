@@ -1,6 +1,8 @@
 # Draft release metadata
 
-**Title:** NORPEK: Nightfall Survivors
+**Proposed Playables listing title:** Nightfall Survivors
+
+The existing in-game/website title remains NORPEK: Nightfall Survivors. The listing draft omits the publisher-style NORPEK prefix because the public [design requirements](https://developers.google.com/youtube/gaming/playables/certification/requirements_design) prohibit branding/logos in listing titles, descriptions and thumbnails. Confirm the exact metadata fields and thumbnail dimensions in the portal before submission; public documentation directs developers there for the complete specification. No game rename or submission has been performed.
 
 **Short description:** Hold back the horde, forge a powerful build, and defeat Death to reclaim the dawn.
 

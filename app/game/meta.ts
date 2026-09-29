@@ -131,7 +131,9 @@ function validSnapshot(value: unknown, ledger: RewardLedger | null): RunSnapshot
     return false;
   };
   if (!safe(value.state, 0) || bytes(JSON.stringify(value.state)) > 640_000) return null;
-  return { version: 1, runId: value.runId, savedAt: boundedNumber(value.savedAt, 0, Number.MAX_SAFE_INTEGER), state: value.state };
+  // An incompatible run must never prevent recovery of valid permanent progress.
+  if (typeof value.savedAt !== "number" || !Number.isSafeInteger(value.savedAt) || value.savedAt < 0) return null;
+  return { version: 1, runId: value.runId, savedAt: value.savedAt, state: value.state };
 }
 
 /** Missing optional fields migrate safely; invalid currency/ranks fail closed rather than erase progress. */
@@ -325,6 +327,8 @@ export function createProfileRepository(storage: ProfileStorage) {
   let pending: WriteRequest | null = null;
   let draining = false;
   let lastWriteError: unknown = null;
+  // A rejected network promise may have committed its payload before losing the acknowledgement.
+  let uncertainRaw: string | null = null;
 
   const load = (): Promise<ProfileLoadResult> => {
     if (loading) return loading;
@@ -343,14 +347,14 @@ export function createProfileRepository(storage: ProfileStorage) {
         const raw = await storage.loadData();
         failedRaw = raw;
         const profile = raw === null ? createDefaultProfile() : parseProfile(raw);
-        lastRaw = raw; current = profile; highestRevision = profile.revision; highestRaw = JSON.stringify(profile); status = "ready"; lastWriteError = null;
+        lastRaw = raw; current = profile; highestRevision = profile.revision; highestRaw = JSON.stringify(profile); status = "ready"; lastWriteError = null; uncertainRaw = null;
         failedRaw = undefined;
         const discardedSnapshot = raw !== null && Boolean((JSON.parse(raw) as Record<string, unknown>).activeRun) && !profile.activeRun;
         return { status: "ready", profile, isNew: raw === null, ...(discardedSnapshot ? { warning: "The previous run cannot be resumed in this version. Your earned gold and permanent progress are safe." } : {}) };
       } catch (error) {
         status = "error";
         let backup: ProfileSave | undefined;
-        if (!(error instanceof SaveDataError && error.reason === "future")) {
+        if (failedRaw !== undefined && !(error instanceof SaveDataError && error.reason === "future")) {
           try { const raw = await storage.loadBackup?.(); if (raw) backup = parseProfile(raw); } catch { /* Corrupt backups must not replace the original. */ }
         }
         availableBackup = backup;
@@ -375,7 +379,7 @@ export function createProfileRepository(storage: ProfileStorage) {
       if (existing !== expected) throw new SaveConflictError();
       await storage.saveData(raw, { preserveBackup: true });
       lastRaw = raw; current = restored; highestRevision = restored.revision; highestRaw = raw;
-      status = "ready"; failedRaw = undefined; availableBackup = undefined; lastWriteError = null;
+      status = "ready"; failedRaw = undefined; availableBackup = undefined; lastWriteError = null; uncertainRaw = null;
       return { status: "ready", profile: restored, isNew: false };
     } catch (error) {
       status = "error";
@@ -384,6 +388,7 @@ export function createProfileRepository(storage: ProfileStorage) {
   };
 
   const prepareWrite = (profile: ProfileSave): string => {
+    if (status === "conflict") throw new SaveConflictError();
     if (status !== "ready") throw new SaveDataError("Progress must load successfully before it can be saved.");
     const raw = JSON.stringify(profile);
     parseProfile(raw);
@@ -398,15 +403,18 @@ export function createProfileRepository(storage: ProfileStorage) {
         const request = pending;
         pending = null;
         try {
-          if (status !== "ready") throw new SaveDataError("Resolve the save conflict before saving more progress.");
+          if (status === "conflict") throw new SaveConflictError();
+          if (status !== "ready") throw new SaveDataError("Progress must load successfully before it can be saved.");
           const remote = await storage.loadData();
           if (status !== "ready") throw new SaveDataError("Saving was interrupted by a progress reload.");
-          // A previously ambiguous failed write may already have succeeded remotely.
-          if (remote !== lastRaw && remote !== request.raw) { status = "conflict"; throw new SaveConflictError(); }
-          if (remote !== request.raw) await storage.saveData(request.raw);
-          lastRaw = request.raw; current = parseProfile(request.raw); lastWriteError = null;
+          // Only our last acknowledged or exact attempted payload may precede a newer queued revision.
+          if (remote !== lastRaw && remote !== request.raw && (uncertainRaw === null || remote !== uncertainRaw)) { status = "conflict"; throw new SaveConflictError(); }
+          if (remote !== null && remote === uncertainRaw) { lastRaw = remote; current = parseProfile(remote); }
+          if (remote !== request.raw) { uncertainRaw = request.raw; await storage.saveData(request.raw); }
+          lastRaw = request.raw; current = parseProfile(request.raw); lastWriteError = null; uncertainRaw = null;
           for (const waiter of request.waiters) waiter.resolve();
         } catch (error) {
+          if (error instanceof Error && error.name === "SaveConflictError") status = "conflict";
           lastWriteError = error;
           for (const waiter of request.waiters) waiter.reject(error);
         }
@@ -437,8 +445,9 @@ export function createProfileRepository(storage: ProfileStorage) {
     draining = true;
     let write: Promise<void>;
     // Invoke synchronously in the pause callback, without another load or overlapping an earlier write.
+    uncertainRaw = raw;
     try { write = storage.saveData(raw, { pauseCheckpoint: true }); } catch (error) { write = Promise.reject(error); }
-    const result = write.then(() => { lastRaw = raw; current = parseProfile(raw); lastWriteError = null; }, (error: unknown) => {
+    const result = write.then(() => { lastRaw = raw; current = parseProfile(raw); lastWriteError = null; uncertainRaw = null; }, (error: unknown) => {
       lastWriteError = error;
       if (error instanceof Error && error.name === "SaveConflictError") status = "conflict";
       throw error;

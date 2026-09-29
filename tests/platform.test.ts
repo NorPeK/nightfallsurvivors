@@ -122,3 +122,52 @@ test('a request beginning while active cannot cross a pause through a microtask 
   callbacks.resume(); const saving = p.saveData('now'); assert.equal(events.at(-1), 'save:now');
   callbacks.pause(); await saving; p.dispose();
 });
+
+test('a late load cannot reopen saving after disposal or a newer failed load', async () => {
+  const { sdk } = fixture(); let release!: (raw: string) => void;
+  sdk.game.loadData = () => new Promise(resolve => { release = resolve; });
+  const disposed = new GamePlatform({ sdk });
+  const oldLoad = disposed.loadData(); disposed.dispose(); release('{"gold":999}');
+  await assert.rejects(oldLoad, /closed/);
+  await assert.rejects(disposed.saveData('{}'), /finish loading/); disposed.dispose();
+
+  const p = new GamePlatform({ sdk }); const earlier = p.loadData();
+  sdk.game.loadData = async () => { throw new Error('offline'); };
+  await assert.rejects(p.loadData(), /offline/); release('{"gold":999}');
+  await assert.rejects(earlier, /superseded/);
+  await assert.rejects(p.saveData('{}'), /finish loading/); p.dispose();
+});
+
+test('disposal tolerates a broken unsubscribe and resets suspension for a new session', async () => {
+  const { sdk, callbacks, events } = fixture();
+  sdk.system.onPause = cb => { callbacks.pause = cb; return () => { events.push('off-pause'); throw new Error('SDK cleanup failed'); }; };
+  const p = new GamePlatform({ sdk }); p.init();
+  const stalePause = callbacks.pause;
+  callbacks.pause(); const waiting = p.loadData();
+  const rejected = assert.rejects(waiting, /closed/);
+  assert.doesNotThrow(() => p.dispose()); await rejected;
+  assert.deepEqual(events, ['off-pause', 'off-resume', 'off-audio']);
+  assert.equal(p.suspended, false);
+  assert.equal(await p.loadData(), '{"gold":2}');
+  stalePause(); assert.equal(p.suspended, false, 'a retained callback from the old SDK session is inert');
+  p.firstFrameReady(); p.gameReady(); p.dispose();
+});
+
+test('a completed old cloud write cannot mutate the new session after disposal', async () => {
+  const { sdk, events } = fixture(); const p = new GamePlatform({ sdk }); await p.loadData();
+  let release!: () => void;
+  sdk.game.saveData = async () => { await new Promise<void>(resolve => { release = resolve; }); };
+  const pending = p.saveData('old'); const rejected = assert.rejects(pending, /closed/);
+  p.dispose(); await p.loadData(); release(); await rejected;
+  // The old network request cannot be cancelled; its completion must not authorize a new stale local baseline.
+  sdk.game.saveData = async raw => { events.push(`save:${raw}`); };
+  await p.saveData('new'); assert.equal(events.at(-1), 'save:new'); p.dispose();
+});
+
+test('a failed SDK error report cannot interrupt game recovery or send during suspension', () => {
+  const { sdk, callbacks } = fixture(); let reports = 0;
+  sdk.health = { logError() { reports++; throw new Error('Diagnostic transport unavailable'); } };
+  const p = new GamePlatform({ sdk }); p.init();
+  assert.doesNotThrow(() => p.reportError()); assert.equal(reports, 1);
+  callbacks.pause(); p.reportError(); assert.equal(reports, 1); p.dispose();
+});

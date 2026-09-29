@@ -2,7 +2,7 @@
 
 A gothic, single-player horde-survival game built with TypeScript, Canvas 2D, React, and a statically exported Next.js website. Survive thirty minutes, defeat the harbingers at 5:00 and 15:00, then defeat Death to reclaim the dawn. The final fight may extend past thirty minutes.
 
-The upgrade is tracked in [plan.md](plan.md). See the [dated verification record](docs/verification-2026-09-28.md), [release checks](docs/release-checklist.md), [known limitations](docs/known-issues.md) and [changelog](CHANGELOG.md). A locally built Playables package is a test candidate, not YouTube certification.
+The upgrade is tracked in [plan.md](plan.md). See the [latest verification record](docs/verification-2026-09-29.md), [release checks](docs/release-checklist.md), [known limitations](docs/known-issues.md) and [changelog](CHANGELOG.md). A locally built Playables package is a test candidate, not YouTube certification.
 
 ## Run and build
 
@@ -24,11 +24,15 @@ npm run build:all
 | `npm run build:standalone` | Fresh self-contained `game.html`; no Next build prerequisite |
 | `npm run build:playables` | `dist/playables/`, ZIP and SHA-256 manifest |
 | `npm run preview:playables` | Local candidate on port 3001 with restrictive CSP |
+| `npm run preview:mobile` | Serve the built website on your trusted Wi-Fi for physical phone testing; prints phone URLs |
+| `npm run build:qa` / `npm run preview:qa` | Separate development-only scenario build in `qa-output/browser/`, served on port 4300 |
 | `npm run validate:playables` | Inspect generated ZIP structure, paths and size limits |
 | `npm run test:engine` | Deterministic combat, lifecycle, snapshot and content checks |
 | `npm run test:integration` | Persistence, audio and platform adapter checks |
 
 Open `game.html` directly for offline play. Browser storage behavior for `file:` URLs varies; serving the web build is preferred for durable progress. The Playables build needs the official SDK network request; outside YouTube it visibly uses session-only preview progress.
+
+For the owner's Android and iPhone checks, follow [the phone playtest guide](docs/phone-playtest.md). The normal server stays on loopback. The mobile command explicitly listens on the local network, serves only `out/`, and is stopped with Ctrl-C; it does not publish a website. Save progress is separate for each device/browser/origin.
 
 ## Controls and systems
 
@@ -58,7 +62,9 @@ BALANCE_SEEDS=1,2 node --import tsx scripts/simulate-balance.ts
 
 The long test is an explicitly assisted director/stability fixture. The balance script uses legal builds and a deterministic bot; neither substitutes for human playtests, device profiling or YouTube validation. Release UI exposes no time-skip or invulnerability shortcuts.
 
-With the development server running, open `http://127.0.0.1:3000/?debug=1` for the QA lab. It uses a disposable in-memory profile, never reads or writes real progress, and can open each draft/chest/evolution/Covenant/outcome phase with chosen enemies and bosses. The lab is excluded from production UI and invulnerable test runs cannot export resumable saves.
+Run `npm run build:qa` followed by `npm run preview:qa`, then open `http://127.0.0.1:4300/?debug=1` for the QA lab. The same lab is available from the Next development server with `?debug=1`. It uses a disposable in-memory profile, never reads or writes real progress, and can open each draft/chest/evolution/Covenant/outcome phase with chosen enemies and bosses. It includes rolling frame diagnostics and a battlefield-only PNG capture. The lab is excluded from production UI and invulnerable test runs cannot export resumable saves. Never submit `qa-output/` as a release.
+
+For isolated persistence faults, build the standalone and run `node --import tsx scripts/recovery-lab.mts`. The printed loopback URL provides test-only profiles and blocked-read/write, backup and conflict controls; it does not touch ordinary saves. See [the recovery audit](docs/save-recovery-audit-2026-09-29.md). The [balance and CPU audit](docs/balance-audit-sept29.md) contains bounded reproduction commands and raw evidence.
 
 ## Source layout
 

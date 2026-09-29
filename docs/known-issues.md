@@ -1,10 +1,12 @@
 # Candidate limitations and open verification
 
-Version 0.2.0 is a local test candidate. See [the dated verification record](verification-2026-09-28.md) and [release checklist](release-checklist.md) for observed results.
+Version 0.2.1 is a local test candidate. See [the latest verification record](verification-2026-09-29.md) and [release checklist](release-checklist.md) for observed results.
 
 - Physical Android/iPhone input, interruption, performance, heat and battery tests have not been performed.
 - Natural full-run balance for every hunter/save profile and dense combat readability have not been established. Headless assisted fixtures and deterministic bots do not establish those results.
-- Selected responsive screens, purchase/refund and website checkpoint restoration passed local Chrome checks. Full keyboard/touch/failure/recovery and listening coverage remains open; see the exact observed matrix in the verification record.
+- The 24-case bot matrix won 22 cases but lost fresh/partial Reaper seed 2 in the first minute. Winning runs reached levels 183–213. Human early Reaper control and late surplus-draft interruption frequency need review before tuning; the bot resolves choices instantly.
+- Selected responsive screens, keyboard recovery focus, purchase/refund, checkpoint restoration and isolated storage-fault/conflict recovery passed local Chrome checks. Full touch/assistive-technology and listening coverage remains open; see the exact observed matrix in the verification record.
+- Dense hit-flash readability was improved after an actual canvas capture. Short development-browser and Node CPU diagnostics do not establish sustained release/mobile FPS, heap stability or thermal behavior.
 - Actual YouTube cloud, lifecycle, audio and certification checks require portal access, which the owner does not yet have. Local SDK preview progress is temporary.
 - One active profile writer is supported. Two devices playing concurrently are not merged; conflicts require reloading the latest progress.
 - Closing immediately after new progress may lose changes after the last durable checkpoint. Large run snapshots cannot rely on YouTube's small best-effort exit-save window.

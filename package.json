@@ -1,6 +1,6 @@
 {
   "name": "norpekgame",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -11,9 +11,12 @@
     "build:standalone": "node scripts/build-game.mjs standalone",
     "build:playables": "node scripts/build-game.mjs playables",
     "build:all": "npm run build:web && npm run build:standalone && npm run build:playables",
+    "build:qa": "node scripts/build-game.mjs qa",
+    "preview:qa": "node scripts/serve.mjs --dir qa-output/browser --port 4300",
     "preview:playables": "node scripts/serve.mjs --dir dist/playables --port 3001 --csp",
+    "preview:mobile": "node scripts/serve.mjs --dir out --port 4173 --host 0.0.0.0",
     "typecheck": "tsc --noEmit --incremental false",
-    "test": "node --import tsx --test tests/*.test.ts",
+    "test": "node --import tsx --test tests/*.test.ts tests/*.test.mjs",
     "test:engine": "node --import tsx --test tests/engine*.test.ts",
     "test:integration": "node --import tsx --test tests/platform*.test.ts tests/save*.test.ts tests/audio*.test.ts",
     "validate:playables": "node scripts/validate-playables.mjs"

@@ -2,7 +2,33 @@
 
 Prepared September 27, 2026. Execution authorized September 28, 2026. This is now the living design, implementation and verification record. Baseline audit observations below describe the pre-upgrade source; use the execution ledger for current status.
 
-Reading guide: the execution ledger below is the current disposition of every section and original issue. Sections 1–22 preserve the original audit, design hypotheses and proposed roadmap as historical reference. Their words “current,” “proposed” and “next” refer to the September 27 baseline, not to the upgraded candidate. Use the ledger and [release checklist](docs/release-checklist.md) for work still required.
+Reading guide: the September 29 follow-up is the latest candidate record. The September 28 ledger maps every original section and issue to its implementation or explicit deferral; its measurements are historical. Sections 1–22 preserve the original audit, design hypotheses and proposed roadmap. Their words “current,” “proposed” and “next” refer to the September 27 baseline. Use the latest audit and [release checklist](docs/release-checklist.md) for work still required.
+
+## Follow-up audit — September 29, 2026
+
+Candidate **0.2.1 is built and locally verified**. All 126 regular regressions pass; the separate assisted long Classic fixture also passed after the engine fixes. Typecheck, lint, website/standalone/Playables builds and archive validation pass. A fresh independent `npm ci` reproduces both bundles byte for byte, including an alternate-time-zone ZIP rebuild. The original F01–F27 corrections remain in place; this deeper audit identified and corrected the additional interactions below. Nothing has been deployed or submitted, and this is not a claim of perfection or YouTube certification.
+
+| Follow-up area | Implemented correction / evidence |
+| --- | --- |
+| Combat and progression | Boss XP applies Growth once; weaker slows cannot thaw or extend freeze; swept projectiles resolve the nearest surface, including bosses; Fireballs explode at impact; Void Sphere displacement remains within spatial query bounds; Hunter’s Oath applies to bosses. Saved/live drafts enforce six slots, exact next rank and evolution readiness. **50 engine regressions pass.** |
+| Persistence and lifecycle | Every coalesced caller sees a write conflict; an acknowledged-by-data but failed-by-transport write can reconcile safely; malformed run timestamps preserve permanent progress. Unreadable primaries cannot authorize backup replacement. Stale SDK completions/callbacks cannot reopen saving or mutate a later session; cleanup continues through failing unsubscribe/log handlers. |
+| Controls and accessibility | Playables leaves Escape to the host; browser shortcuts/composition do not move the hunter. Resize releases movement. Focus includes recovery actions, background controls are inert behind decisions/suspension, mandatory error recovery cannot be dismissed with P, and save-error height reserves room above footer actions. Numeric checks cover 39 active CSS text families; full assistive-technology certification is not claimed. |
+| Visual comfort | Reduced motion/flash settings suppress additional decorative pulses and bright fills while preserving danger geometry. An actual dense canvas capture exposed opaque hit-flash clutter; final flashes blend at 28% over normal/frozen sprites and the hunter locator has a dark backing. Final captured pixels are in the dated verification; subjective phone readability remains open. |
+| Balance evidence | **24 distinct legal-build bot cases: 22 wins, 2 defeats, no horizon timeouts.** Every win delivered 14 elites, 7 swarms and all 3 bosses. Reaper seed 2 died at 0:21 fresh and 0:43 partial; winning levels 183–213 flag surplus-draft pacing. These become human playtest targets, not reasons for speculative stat changes. The raw budget interruption and bounded completion are retained. |
+| Performance evidence | Bounded Node simulation CPU/memory diagnostics cover early, dense and finale scenes. A final QA browser burst recorded 227 frame intervals at 1280×720; it is explicitly too short and artificial to certify sustained/mobile performance. Rolling diagnostics and real-canvas capture exist only in the separate QA build. |
+| Failure/recovery browser evidence | Isolated corrupt-backup, blocked-load/write, future-schema and external-writer flows were exercised. The final standalone was retested at 320×568: buy Might 1,000→850, observe save failure, click Retry after restoring writes, reload to durable 850 gold. No real profiles were used for destructive fixtures. |
+| Delivery and phone handoff | Added a read-only preview server with traversal/symlink containment, a separate QA artifact and isolated recovery lab. `npm run preview:mobile` prepares same-Wi-Fi testing; [the phone guide](docs/phone-playtest.md) includes result cards. Listing metadata now proposes “Nightfall Survivors” in accordance with the public no-branding metadata rule; exact portal assets remain pending. |
+
+Latest evidence: [verification and artifact hashes](docs/verification-2026-09-29.md), [engine/balance/CPU audit](docs/balance-audit-sept29.md), [save audit](docs/save-recovery-audit-2026-09-29.md), [UI/contrast audit](docs/ui-audit-2026-09-29.md), [independent reproduction](docs/reproducibility-2026-09-29.md). Final ZIP: **130,201 bytes**, 5 files / **412,928 bytes uncompressed**, SHA-256 `9e944a8e30d39b12ecaf9087db2b72666afaeac212cea4668e9f8e70b14ab8c6`. Standalone: **409,725 bytes**.
+
+### Next release gates — still open
+
+1. **Human balance:** natural fresh/partial/full runs, especially Reaper's first minute and late surplus-draft frequency; alternative builds, boss escape routes, Covenant optionality and economy pacing. No blanket buff/nerf was made from one bot's two seeds.
+2. **Android and iPhone:** use the prepared guide, record exact models/OS/browser, verify touch/rotation/interruption/audio/durable saves, then complete full-run heat/frame-time and repeated-session checks. The owner has both devices; no physical results are recorded yet.
+3. **Remaining local matrix:** broader final-build keyboard/mouse/zoom/assistive-technology coverage, listening and sustained profiling, plus direct-file standalone opening. Selected checks passed; intermittent browser-control connection timeouts limited the final expanded viewport recheck and are not logged as game passes or game crashes.
+4. **Official YouTube:** owner currently has no portal access. Onboarding, Dev Link/test suite, real SDK cloud/lifecycle/mute, metadata dimensions and rights details remain required. No upload or deployment has occurred.
+
+Optional content deferrals in the original ledger are unchanged. Hardware and portal evidence cannot be replaced by source tests; this plan keeps those gates open rather than marking all 22 areas release-complete.
 
 ## Execution ledger — September 28, 2026
 

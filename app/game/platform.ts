@@ -46,6 +46,8 @@ export class SaveConflictError extends Error {
 
 export class GamePlatform {
   private initialized = false;
+  private lifecycle = 0;
+  private loadSerial = 0;
   private firstFrameSent = false;
   private readySent = false;
   private loaded = false;
@@ -95,16 +97,20 @@ export class GamePlatform {
     }
     if (this.isPlayables && this.sdk) {
       const disposers: (() => void)[] = [];
+      const lifecycle = this.lifecycle;
       try {
         this.enabled = this.sdk.system.isAudioEnabled();
-        disposers.push(this.sdk.system.onPause(() => this.setPaused(true)));
-        disposers.push(this.sdk.system.onResume(() => this.setPaused(false)));
+        disposers.push(this.sdk.system.onPause(() => { if (lifecycle === this.lifecycle) this.setPaused(true); }));
+        disposers.push(this.sdk.system.onResume(() => { if (lifecycle === this.lifecycle) this.setPaused(false); }));
         disposers.push(this.sdk.system.onAudioEnabledChange((enabled) => {
+          if (lifecycle !== this.lifecycle) return;
           this.enabled = enabled;
           for (const listener of this.audioListeners) listener(enabled);
         }));
         this.disposers.push(...disposers);
       } catch (error) {
+        this.lifecycle++;
+        this.paused = false;
         for (const dispose of disposers) { try { dispose(); } catch { /* preserve the initialization error */ } }
         throw error;
       }
@@ -143,6 +149,10 @@ export class GamePlatform {
     while (this.paused) await new Promise<void>((resolve, reject) => this.resumeWaiters.add({ resolve, reject }));
   }
 
+  private assertSession(lifecycle: number): void {
+    if (lifecycle !== this.lifecycle) throw new Error("The game session was closed.");
+  }
+
   onPause(callback: () => void): () => void {
     this.pauseListeners.add(callback);
     return () => { this.pauseListeners.delete(callback); };
@@ -178,12 +188,17 @@ export class GamePlatform {
 
   async loadData(): Promise<string | null> {
     this.init();
+    const lifecycle = this.lifecycle;
     while (this.paused) await this.waitUntilResumed();
+    this.assertSession(lifecycle);
+    const serial = ++this.loadSerial;
     // A rejection leaves saving locked. The caller must retry loading successfully.
     this.loaded = false;
     const raw = this.storageKind === "cloud"
       ? await this.sdk!.game.loadData()
       : this.storageKind === "preview" ? this.previewData : this.storage.getItem(SAVE_KEY);
+    this.assertSession(lifecycle);
+    if (serial !== this.loadSerial) throw new Error("Progress loading was superseded. Retry loading the latest progress.");
     this.lastRead = this.storageKind === "browser" ? raw : raw || null;
     this.loaded = true;
     return this.lastRead;
@@ -196,10 +211,12 @@ export class GamePlatform {
 
   async saveData(data: string, options?: { preserveBackup?: boolean; pauseCheckpoint?: boolean }): Promise<void> {
     this.init();
+    const lifecycle = this.lifecycle;
     // The SDK permits a short onPause save window. Only one explicitly marked
     // boundary checkpoint may bypass the gate; ordinary queued work waits.
     if (options?.pauseCheckpoint && this.paused && this.pauseWriteAvailable && this.loaded && !this.writesInFlight) this.pauseWriteAvailable = false;
     else while (this.paused) await this.waitUntilResumed();
+    this.assertSession(lifecycle);
     if (!this.loaded) throw new Error("Progress must finish loading before it can be saved.");
     if (new TextEncoder().encode(data).byteLength >= 3 * 1024 * 1024) {
       throw new Error("Your save is too large. Existing saved progress has been kept.");
@@ -207,7 +224,7 @@ export class GamePlatform {
     if (this.storageKind === "cloud") {
       this.writesInFlight++;
       try { await this.sdk!.game.saveData(data); }
-      finally { this.writesInFlight--; }
+      finally { if (lifecycle === this.lifecycle) this.writesInFlight--; }
     } else if (this.storageKind === "preview") {
       // The official SDK is a no-op locally. Preview progress lasts for this page only.
       this.previewData = data;
@@ -220,13 +237,18 @@ export class GamePlatform {
       }
       storage.setItem(SAVE_KEY, data);
     }
+    this.assertSession(lifecycle);
     this.lastRead = data;
   }
 
-  reportError(): void { if (!this.paused) this.sdk?.health?.logError(); }
+  reportError(): void {
+    if (this.paused) return;
+    try { this.sdk?.health?.logError(); } catch { /* Diagnostics must not interrupt the actual recovery path. */ }
+  }
 
   dispose(): void {
-    for (const dispose of this.disposers) dispose();
+    this.lifecycle++;
+    const disposers = this.disposers;
     this.disposers = [];
     this.pauseListeners.clear();
     this.resumeListeners.clear();
@@ -235,6 +257,12 @@ export class GamePlatform {
     this.resumeWaiters.clear();
     this.initialized = false;
     this.loaded = false;
+    this.paused = false;
+    this.pauseWriteAvailable = false;
+    this.writesInFlight = 0;
+    this.lastRead = null;
+    this.frameRequested = this.readyRequested = this.firstFrameSent = this.readySent = false;
+    for (const dispose of disposers) { try { dispose(); } catch { /* One broken SDK cleanup must not strand the remaining session. */ } }
   }
 }
 

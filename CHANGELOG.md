@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.2.1 — follow-up local candidate, September 29, 2026
+
+Not deployed or certified. See [the follow-up verification](docs/verification-2026-09-29.md).
+
+- Corrected boss XP Growth, freeze/slow priority, swept projectile contact order, Fireball impact position, Void Sphere spatial queries and Hunter’s Oath boss damage. Restored and live drafts now enforce equipment slots and exact upgrade eligibility.
+- Hardened save conflict handling, lost-write-acknowledgement recovery and stale SDK lifecycle completions. Unreadable primary saves no longer offer an unusable backup action; malformed run timestamps preserve permanent progress.
+- Fixed keyboard focus around save errors, suspension and mandatory recovery; released movement on resize; preserved YouTube’s ownership of Escape. Improved text contrast and comfort settings.
+- Blended hit flashes over enemy artwork and strengthened the hunter outline after reviewing an actual dense-combat capture.
+- Added isolated save-failure tooling, bounded frame/simulation diagnostics, a separate QA build, a safer local preview server and an Android/iPhone test guide. Production builds exclude the QA interface.
+- Completed 24 legal-build bot cases: 22 wins and two early Reaper defeats. These are diagnostic results, not proof of human balance; first-minute Reaper play and late surplus-draft pacing remain explicit review targets.
+
+The save profile schema remains 2. No permanent prices, owned ranks or published damage values were retuned from bot results alone.
+
 ## 0.2.0 — local candidate, September 28, 2026
 
 Not deployed or certified. Physical-device, human balance and official YouTube checks remain release gates; see [the verification record](docs/release-checklist.md).

@@ -16,11 +16,11 @@ npm run build:all
 npm run validate:playables
 ```
 
-Final local result: **100 normal tests passed**, with the optional long Classic fixture passed separately. TypeScript, ESLint, all three builds and archive validation passed. A clean install reproduced identical standalone and ZIP artifacts; a second timezone also produced the identical ZIP. See [the dated verification record](verification-2026-09-28.md) and [clean-build record](clean-build.md) for counts, limits and SHA-256.
+Latest local result (0.2.1, September 29): **126 normal tests passed**, with the optional long Classic fixture passed separately after the engine fixes. TypeScript, ESLint, all three builds and archive validation passed. A fresh independent install reproduced identical standalone, ZIP and manifest artifacts; a second time zone also produced the identical ZIP. See [the latest verification](verification-2026-09-29.md) and [independent reproduction](reproducibility-2026-09-29.md) for counts, limits and SHA-256. September 28 records are historical.
 
 The normal suite covers combat defects, terminal ordering, pool saturation, input resets, persistence/migration/recovery, snapshot restoration, platform lifecycle/audio, content and archive constraints. The optional long fixture continuously steps the authored Classic schedule with an explicitly assisted build. Neither is a human balance test.
 
-`BALANCE_SEEDS=1,2 node --import tsx scripts/simulate-balance.ts` produces local diagnostic records. Save command parameters with output; selected hunters/profiles, maximum simulated duration and AI movement policy materially change interpretation. No telemetry is transmitted.
+The [September 29 balance audit](balance-audit-sept29.md) records 24 completed legal-build bot cases: 22 wins, two early Reaper defeats. It includes bounded reproduction commands, interrupted-attempt evidence and simulation CPU/memory diagnostics. Human first-minute Reaper control and late surplus-draft pacing remain explicit targets. Save command parameters with output; selected hunters/profiles, duration and AI policy materially change interpretation. No telemetry is transmitted.
 
 ## Artifact checks
 
@@ -40,15 +40,17 @@ For each row, record browser/OS version, screenshot, input method and pass/fail 
 | Environment | Status |
 | --- | --- |
 | Development Chrome desktop, Apple M4 / 16 GB host | Isolated QA defeat, victory/retry, purchase and exact refund observed. Forced scenarios are not natural full-run evidence. |
-| Chrome responsive 320×568 | Hunter scrolling/pause, isolated draft reroll and chest scroll/Continue observed. Full generated-artifact flow still required. |
+| Chrome responsive 320×568 | Earlier draft/chest scrolling; final 0.2.1 standalone blocked-save purchase → visible Retry → durable reload passed in isolated storage lab. Keyboard wrap through Retry also observed. Full generated-artifact/input matrix remains open. |
 | Chrome responsive 390×844 and 844×390 | Playables menu/settings/hunter/hunt/pause/end/recap/shop and build-panel scrolling observed; timer remained frozen. Isolated Covenant acceptance observed. |
-| Tablet portrait/landscape | 1024×768 isolated evolution selection/chest observed; portrait and complete matrix pending. |
-| Desktop 1280×720, 1920×1080, wide/short stress | 1280×720 isolated outcome/retry observed; exported website reload restored exact paused state. 1920×1080 and wide/short stress pending. |
+| Tablet portrait/landscape | Earlier 1024×768 isolated evolution/chest; baseline export 768×1024 menu/settings and keyboard return observed September 29. Final expanded viewport recheck was limited by intermittent browser-control timeouts. |
+| Desktop 1280×720, 1920×1080, wide/short stress | Final QA dense capture and a short 227-frame diagnostic recorded at 1280×720. Final website retained the paused 00:08 saved hunt. Baseline export settings at 1920×540 and pause at 320×1138 were reachable. Full final 1920×1080/wide/short matrix remains open. |
 | Android physical device | Owner has a device; model/browser/results pending. |
 | iPhone physical device | Owner has a device; model/iOS/results pending. |
 | YouTube desktop/mobile web, Android/iOS app | Blocked by portal onboarding/access, not marked passed. |
 
 ## Physical-device test card
+
+Use [the phone playtest guide](phone-playtest.md) for the same-Wi-Fi command and a per-device result form. No LAN server or public deployment is started by writing that guide.
 
 1. Start with a fresh test profile. Without coaching, move, collect XP, choose an upgrade, pause, inspect a recipe and return to play. Record confusing steps.
 2. Play one complete Classic run on each phone. Record hunter, permanent ranks, weapons, evolution times, boss durations, death cause and whether warnings left a clear escape route. Include fresh, partial and full progression over subsequent runs.

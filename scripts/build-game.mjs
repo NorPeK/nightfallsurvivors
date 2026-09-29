@@ -10,7 +10,7 @@ import { zipSync, strToU8 } from 'fflate';
 import { validateBundle } from './validate-playables.mjs';
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const target = process.argv[2] ?? 'standalone';
-if (!['standalone', 'playables'].includes(target)) throw new Error('Target must be standalone or playables.');
+if (!['standalone', 'playables', 'qa'].includes(target)) throw new Error('Target must be standalone, playables or qa.');
 const licenses = await Promise.all(['react', 'react-dom', 'scheduler'].map(async (name) => `${name}\n${await readFile(join(root, 'node_modules', name, 'LICENSE'), 'utf8')}`));
 const notices = `NORPEK: Nightfall Survivors — bundled runtime notices\n\n${licenses.join('\n\n')}`;
 const cssFile = join(root, 'app/globals.css');
@@ -20,7 +20,7 @@ const result = await build({
   entryPoints: [join(root, 'app/standalone.tsx')], bundle: true, minify: true, format: 'iife', jsx: 'automatic',
   target: ['es2020'], charset: 'utf8', legalComments: 'inline',
   banner: { js: `/*!\n${notices.replace(/\*\//g, '* /')}\n*/` },
-  define: { 'process.env.NODE_ENV': '"production"', 'process.env.NEXT_PUBLIC_GAME_TARGET': JSON.stringify(target === 'playables' ? 'playables' : 'web'), 'process.env.NEXT_PUBLIC_GAME_DEBUG': '"false"' },
+  define: { 'process.env.NODE_ENV': JSON.stringify(target === 'qa' ? 'development' : 'production'), 'process.env.NEXT_PUBLIC_GAME_TARGET': JSON.stringify(target === 'playables' ? 'playables' : 'web'), 'process.env.NEXT_PUBLIC_GAME_DEBUG': '"false"' },
   write: false, logLevel: 'warning', metafile: true,
 });
 const js = result.outputFiles[0].text;
@@ -33,7 +33,12 @@ const script = target === 'playables' ? '<script src="./game.js"></script>' : `<
 const html = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#080912"><title>NORPEK: Nightfall Survivors</title>
 ${sdk}${iconLink}${styles}</head><body><div id="root"><p style="color:#f5e9ce;background:#080912;padding:2rem;font:18px Georgia,serif">Preparing the night…</p></div>${script}</body></html>`;
-if (target === 'standalone') {
+if (target === 'qa') {
+  const output = join(root, 'qa-output/browser');
+  await mkdir(output, { recursive: true });
+  await writeFile(join(output, 'index.html'), html);
+  console.log(`Development QA only: qa-output/browser/index.html (${Buffer.byteLength(html).toLocaleString()} bytes). Open with ?debug=1; never submit this artifact.`);
+} else if (target === 'standalone') {
   await writeFile(join(root, 'game.html'), html);
   console.log(`Standalone game.html: ${Buffer.byteLength(html).toLocaleString()} bytes`);
 } else {

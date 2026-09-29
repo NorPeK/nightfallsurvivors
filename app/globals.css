@@ -236,7 +236,7 @@ button{
   color:#eeddb8;
 }
 .hero-screen{
-  background:linear-gradient(90deg,#08081070,#08081080);
+  background:linear-gradient(90deg,#080810cf,#080810d9);
 }
 .hero-screen .screen-content{
   max-width:660px;
@@ -677,6 +677,9 @@ button{
   flex-direction:column;
   gap:6px;
   filter:drop-shadow(0 2px 2px #000);
+  background:#080910d9;
+  border-radius:6px;
+  padding:3px;
 }
 .hud-time strong{
   font-family:Georgia,serif;
@@ -768,6 +771,9 @@ button{
   color:#ffe1d3;
   text-shadow:0 2px 2px #000;
   margin-bottom:7px;
+  background:#180f1ae8;
+  border-radius:4px;
+  padding:3px 6px;
 }
 .boss-health>div{
   height:12px;
@@ -789,7 +795,7 @@ button{
   pointer-events:none;
   color:#ffb9a8;
   text-shadow:0 3px 8px #000;
-  background:#160d189e;
+  background:#160d18e0;
   padding:14px;
 }
 .boss-warning span{
@@ -871,7 +877,10 @@ button{
   right:16px;
   z-index:31;
   font-size:.6rem;
-  color:#b1a6c1;
+  color:#c5bbd2;
+  background:#14111ee8;
+  border-radius:4px;
+  padding:3px 6px;
   pointer-events:none;
 }
 .save-error{
@@ -889,6 +898,12 @@ button{
   background:#38202a;
   padding:13px;
   font-size:.8rem;
+  max-height:45%;
+  overflow:auto;
+  touch-action:pan-y;
+}
+.game-root[data-save-error=true] .screen-shell{
+  bottom:var(--save-error-height,160px);
 }
 .save-error span{
   flex:1;
@@ -1227,3 +1242,5 @@ button{
 .qa-controls>label {display:flex;justify-content:space-between;gap:12px;align-items:center}
 .qa-controls input:not([type=checkbox]),.qa-controls select {width:155px;min-height:44px;padding:5px;background:#10221b;border:1px solid #698e79}
 .qa-controls>p {font-size:.7rem;color:#c9ddcd}
+.qa-metrics {display:grid;gap:8px;border:1px solid #698e79;padding:10px;background:#10221b;overflow-wrap:anywhere}
+.qa-metrics p,.qa-metrics small {font-size:.7rem;color:#c9ddcd}

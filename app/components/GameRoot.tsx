@@ -18,9 +18,11 @@ const HUNTER_ROLES: Record<CharacterId, { role: string; sigil: string }> = {
   mage: { role: "Arcane controller", sigil: "✧" }, reaper: { role: "Close-range reaper", sigil: "☾" },
 };
 type Panel = "settings" | "journal" | "build" | "end-run" | "refund" | "run-error" | "end-saved" | "reload-save" | null;
+type QaMetrics = { samples: number; frames: number; fps: number; p50: number; p95: number; p99: number; width: number; height: number; dpr: number; enemies: number; projectiles: number; pickups: number; particles: number; effects: number };
 
 export default function GameRoot() {
   const canvasRef = useRef<HTMLCanvasElement>(null), wrapRef = useRef<HTMLDivElement>(null);
+  const curtainRef = useRef<HTMLDivElement>(null), saveErrorRef = useRef<HTMLElement>(null);
   const gameRef = useRef<Game | null>(null), inputRef = useRef<Input | null>(null);
   const profileRef = useRef<ProfileSave | null>(null);
   const settingsRef = useRef<GameSettings>(DEFAULT_SETTINGS);
@@ -28,6 +30,8 @@ export default function GameRoot() {
   const suspendedRef = useRef(false);
   const wakeCanvasRef = useRef<() => void>(() => {});
   const qaRef = useRef(false);
+  const resetQaMetricsRef = useRef<() => void>(() => {});
+  const [qaMetrics, setQaMetrics] = useState<QaMetrics | null>(null);
   const [qaMode, setQaMode] = useState(false);
   const [profile, setProfile] = useState<ProfileSave | null>(null);
   const [loadError, setLoadError] = useState("");
@@ -88,10 +92,14 @@ export default function GameRoot() {
     queueMicrotask(() => setQaMode(qaRef.current));
     try { platform.init(); } catch (error) { const message = error instanceof Error ? error.message : "The platform could not initialize. Check the connection and retry."; queueMicrotask(() => setLoadError(message)); return; }
     const input = new Input(); inputRef.current = input;
+    input.escapePauses = !platform.isPlayables;
     input.setEnabled(false); if (wrapRef.current) input.attach(wrapRef.current);
     input.onDeviceChange = setInputDevice;
     let warningUntil = 0;
     let alive = true, raf = 0, lastSnapshotTime = -15, renderFault = false;
+    const intervals: number[] = [];
+    let qaFrame = 0, qaLastFrame = 0, qaNextPublish = 0;
+    resetQaMetricsRef.current = () => { intervals.length = 0; qaFrame = 0; qaLastFrame = 0; qaNextPublish = 0; setQaMetrics(null); };
     const snapshot = (p: ProfileSave) => {
       const g = gameRef.current; if (!g || qaRef.current) return p;
       try { return withRunSnapshot(p, g.runId, g.exportSnapshot()); }
@@ -109,7 +117,7 @@ export default function GameRoot() {
         changePhase(next);
         if (next === "paused" && profileRef.current) persist(snapshot(profileRef.current));
       }, onHud: (h) => { setHud(h); if (warningUntil && (gameRef.current?.time ?? 0) >= warningUntil) { setBossWarning(""); warningUntil = 0; } }, onLevelUp: setOptions, onChest: setRewards,
-      onRunStart: (runId, hunter) => { renderFault = false; setBossWarning(""); warningUntil = 0; lastSnapshotTime = -15; const p = profileRef.current; if (p) persist(beginRun(p, runId, hunter)); },
+      onRunStart: (runId, hunter) => { renderFault = false; if (qaRef.current) resetQaMetricsRef.current(); setBossWarning(""); warningUntil = 0; lastSnapshotTime = -15; const p = profileRef.current; if (p) persist(beginRun(p, runId, hunter)); },
       onError: (message) => { platform.reportError(); setRunError(message); setPanel("run-error"); input.reset(); audio.setSuspended(true); },
       onEvolutionChoice: setOptions, onCovenant: setCovenants, onProgress: checkpoint,
       onRunEnd: (stats) => {
@@ -125,6 +133,7 @@ export default function GameRoot() {
     gameRef.current = game;
     input.onPause = () => {
       if (suspendedRef.current) return;
+      if (panelRef.current === "run-error") return;
       if (panelRef.current) { setPanel(null); return; }
       if (phaseRef.current === "playing") game.pause();
       else if (phaseRef.current === "paused") game.resume();
@@ -132,7 +141,7 @@ export default function GameRoot() {
     const ctx = canvasRef.current?.getContext("2d");
     // Coalesce invalidations; frozen scenes need one repaint, not a second game loop.
     const wake = () => { if (alive && !suspendedRef.current && !raf) raf = requestAnimationFrame(draw); };
-    const draw = () => {
+    const draw = (frameTime: number) => {
       raf = 0;
       if (!alive || suspendedRef.current) return;
       const canvas = canvasRef.current;
@@ -161,6 +170,20 @@ export default function GameRoot() {
       }
       const p = phaseRef.current;
       const animate = p === "playing" ? !game.suspended : ["menu", "characters", "shop", "howto"].includes(p) && !settingsRef.current.reducedMotion;
+      if (process.env.NODE_ENV !== "production" && qaRef.current) {
+        if (p === "playing" && animate && !panelRef.current && !renderFault) {
+          if (qaLastFrame) { intervals[qaFrame % 600] = frameTime - qaLastFrame; qaFrame++; }
+          qaLastFrame = frameTime;
+        } else qaLastFrame = 0;
+        if (frameTime >= qaNextPublish || !animate) {
+          const sorted = [...intervals].sort((a, b) => a - b);
+          const percentile = (q: number) => sorted[Math.max(0, Math.ceil(sorted.length * q) - 1)] ?? 0;
+          const average = intervals.reduce((sum, value) => sum + value, 0) / intervals.length;
+          const count = (pool: { active: boolean }[]) => pool.reduce((sum, item) => sum + Number(item.active), 0);
+          setQaMetrics({ samples: intervals.length, frames: qaFrame, fps: average > 0 ? 1000 / average : 0, p50: percentile(.5), p95: percentile(.95), p99: percentile(.99), width: wrapRef.current?.clientWidth ?? 0, height: wrapRef.current?.clientHeight ?? 0, dpr: Math.min(2, window.devicePixelRatio || 1), enemies: count(game.enemies), projectiles: count(game.bullets) + count(game.enemyBullets), pickups: count(game.pickups), particles: count(game.particles), effects: game.fx.length });
+          qaNextPublish = frameTime + 1000;
+        }
+      }
       if (!renderFault && !panelRef.current && animate) wake();
     };
     wakeCanvasRef.current = wake;
@@ -170,6 +193,7 @@ export default function GameRoot() {
     const suspend = () => {
       suspendedRef.current = true; setSuspended(true); game.setSuspended("platform", true); input.reset(); audio.setSuspended(true); cancelAnimationFrame(raf);
       raf = 0;
+      qaLastFrame = 0;
       // Reward checkpoints are emitted by the engine; snapshots are captured at the same suspension boundary.
       const p = profileRef.current;
       if (p && game.runId && !["menu", "characters", "shop", "howto", "gameover", "victory"].includes(phaseRef.current)) {
@@ -190,6 +214,7 @@ export default function GameRoot() {
     return () => {
       alive = false; cancelAnimationFrame(raf); cancelAnimationFrame(readyFrame); cancelAnimationFrame(paintedFrame);
       wakeCanvasRef.current = () => {}; resizeObserver.disconnect(); window.removeEventListener("resize", wake);
+      resetQaMetricsRef.current = () => {};
       unsubscribes.forEach((unsubscribe) => unsubscribe()); input.detach(); game.dispose(); audio.dispose();
     };
   }, [changePhase, load, persist, setPanel, startupAttempt]);
@@ -202,6 +227,19 @@ export default function GameRoot() {
     wakeCanvasRef.current();
   }, [settings, profile?.muted]);
   useEffect(() => { wakeCanvasRef.current(); }, [phase, panel]);
+  useEffect(() => {
+    if (!suspended) return;
+    const previous = document.activeElement as HTMLElement | null;
+    curtainRef.current?.focus({ preventScroll: true });
+    return () => { if (previous?.isConnected) previous.focus({ preventScroll: true }); };
+  }, [suspended]);
+  useEffect(() => {
+    const banner = saveErrorRef.current, root = wrapRef.current;
+    if (!banner || !root) return;
+    const observer = new ResizeObserver(() => root.style.setProperty("--save-error-height", `${banner.getBoundingClientRect().height + 24}px`));
+    observer.observe(banner);
+    return () => observer.disconnect();
+  }, [saveError]);
   useEffect(() => {
     audio.setSuspended(suspended || phase === "paused" || Boolean(runError));
     audio.setIntensity(phase === "victory" ? "dawn" : bossActive ? "boss" : phase === "menu" ? "menu" : "hunt");
@@ -229,9 +267,22 @@ export default function GameRoot() {
   };
   const inRun = !["menu", "characters", "shop", "howto"].includes(phase);
   const showOnboarding = phase === "playing" && !settings.onboardingComplete;
+  const captureBattlefield = () => {
+    if (process.env.NODE_ENV === "production" || !qaRef.current) return;
+    const canvas = canvasRef.current;
+    if (!canvas) { setNotice("The battlefield is not available to capture."); return; }
+    try { canvas.toBlob(blob => {
+      if (!blob) { setNotice("The battlefield image could not be created."); return; }
+      const url = URL.createObjectURL(blob), link = document.createElement("a");
+      link.href = url; link.download = "norpek-qa-battlefield.png"; link.hidden = true; document.body.append(link); link.click(); link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setNotice("Captured the actual battlefield canvas. HUD and menus are excluded.");
+    }, "image/png"); } catch { setNotice("This browser could not capture the battlefield image."); }
+  };
 
-  return <main ref={wrapRef} className="game-root" data-reduced-motion={settings.reducedMotion} data-high-contrast={settings.highContrast} data-suspended={suspended} aria-label="NORPEK: Nightfall Survivors">
-    <canvas ref={canvasRef} className="world-canvas" aria-label="Nightfall battlefield. Move with WASD, arrow keys, or drag. Attacks fire automatically." />
+  return <main ref={wrapRef} className="game-root" data-reduced-motion={settings.reducedMotion} data-high-contrast={settings.highContrast} data-suspended={suspended} data-save-error={Boolean(saveError)} aria-label="NORPEK: Nightfall Survivors">
+    <div inert={suspended}>
+    <canvas ref={canvasRef} className="world-canvas" role="img" aria-hidden={phase !== "playing" || Boolean(panel)} aria-label="Nightfall battlefield. Move with WASD, arrow keys, or drag. Attacks fire automatically." />
     <div className="sr-only" role="status" aria-live="polite">{bossWarning ? `${bossWarning} has arrived.` : notice}</div>
     {!profile && <Screen title={loadError ? "Progress needs attention" : "Gathering the night…"} narrow>
       <p>{loadError || "Loading your hunter, settings and permanent power-ups."}</p>
@@ -242,7 +293,7 @@ export default function GameRoot() {
       }}>Replace unreadable save with backup</button>}</div>}
     </Screen>}
     {profile && <>
-      {inRun && hud && !["gameover", "victory"].includes(phase) && <Hud hud={hud} onPause={() => gameRef.current?.pause()} />}
+      {inRun && hud && !["gameover", "victory"].includes(phase) && <Hud hud={hud} inactive={phase !== "playing" || Boolean(panel)} onPause={() => gameRef.current?.pause()} />}
       {bossWarning && phase === "playing" && <div className="boss-warning" aria-hidden="true"><span>HARBINGER APPROACHING</span><strong>{bossWarning}</strong></div>}
       {!panel && phase === "menu" && <Screen title="NORPEK" eyebrow="NIGHTFALL SURVIVORS" hero>
         <p className="hero-copy">Hold back the dark. Shape your build. Survive thirty minutes, defeat two harbingers, and face Death to reclaim the dawn.</p>
@@ -311,12 +362,13 @@ export default function GameRoot() {
       {panel === "run-error" && <Screen title="The hunt stopped safely" eyebrow="RECOVERY" narrow footer={<button className="btn-gold" onClick={() => { setPanel(null); gameRef.current?.abandonRun(); }}>End hunt & keep earned gold</button>}><p>{runError}</p><p>Your permanent progress is retained. End this attempt before starting another hunt.</p></Screen>}
       {panel === "refund" && <Screen title="Rebuild your blessings?" narrow footer={<><button className="btn-ghost" onClick={() => setPanel(null)}>Keep power-ups</button><button className="btn-gold" onClick={() => { const refund = refundUpgrades(profile); persist(refund.profile); setPanel(null); setNotice(`${gold(refund.refunded)} gold refunded.`); }}>Refund all power-ups</button></>}><p>All permanent ranks return to zero and their recorded purchase cost returns to your treasury. This affects future hunts.</p></Screen>}
       {showOnboarding && <aside className="onboarding" data-ui><strong>{inputDevice === "pointer" ? "Drag to move. Release to stop." : "WASD or arrow keys to move. You can also drag."}</strong><span>{hud && hud.time > 10 ? "Collect glowing gems to level up. Pair weapons with passives to unlock evolutions." : "Your weapons attack automatically. Keep an escape route open; Sword Wave follows your last movement direction."}</span><button className="btn-text" onClick={() => changeSettings({ onboardingComplete: true })}>Got it</button></aside>}
-      {saveError && <aside className="save-error" data-ui data-global role="alert"><strong>Progress is waiting to save.</strong><span>{saveError}</span><button className="btn-ghost" onClick={() => { if (saveConflict) { gameRef.current?.pause(); setPanel("reload-save"); } else if (profileRef.current) persist(profileRef.current); }}>{saveConflict ? "Reload saved progress…" : "Retry save"}</button></aside>}
-      {notice && <div className="toast" data-ui role="status">{notice}</div>}
+      {saveError && <aside ref={saveErrorRef} className="save-error" data-ui data-global role="alert"><strong>Progress is waiting to save.</strong><span>{saveError}</span><button className="btn-ghost" onClick={() => { if (saveConflict) { gameRef.current?.pause(); setPanel("reload-save"); } else if (profileRef.current) persist(profileRef.current); }}>{saveConflict ? "Reload saved progress…" : "Retry save"}</button></aside>}
+      {notice && <div className="toast" data-ui>{notice}</div>}
       {!qaMode && !inRun && <div className="save-status" aria-live="off">{saveError ? "Save pending" : qaMode ? "QA · temporary profile, never saved" : platform.storageKind === "preview" ? "SDK preview · progress lasts for this session" : saving ? "Saving…" : "Progress saved"}</div>}
     </>}
-    {process.env.NODE_ENV !== "production" && qaMode && profile && <QaLab onLaunch={(scenario) => { start(scenario.hunter); gameRef.current?.debugScenario(scenario); setHud(gameRef.current?.hudSnapshot() ?? null); }} onPause={() => gameRef.current?.pause()} onResume={() => gameRef.current?.resume()}/>}
-    {suspended && <div className="platform-curtain" data-ui role="status">Hunt suspended</div>}
+    {process.env.NODE_ENV !== "production" && qaMode && profile && <QaLab metrics={qaMetrics} phase={phase} onResetMetrics={() => { resetQaMetricsRef.current(); wakeCanvasRef.current(); }} onCapture={captureBattlefield} onLaunch={(scenario) => { start(scenario.hunter); gameRef.current?.debugScenario(scenario); setHud(gameRef.current?.hudSnapshot() ?? null); }} onPause={() => gameRef.current?.pause()} onResume={() => gameRef.current?.resume()}/>}
+    </div>
+    {suspended && <div ref={curtainRef} tabIndex={-1} className="platform-curtain" data-ui role="status">Hunt suspended</div>}
   </main>;
 }
 
@@ -327,28 +379,33 @@ function Screen({ title, eyebrow, children, footer, narrow = false, hero = false
     opened.current = performance.now();
     const previous = document.activeElement as HTMLElement | null;
     const id = requestAnimationFrame(() => ref.current?.querySelector<HTMLElement>("h1,h2")?.focus());
-    return () => { cancelAnimationFrame(id); if (previous?.isConnected) previous.focus({ preventScroll: true }); };
+    const trapTab = (event: KeyboardEvent) => {
+      if (event.key !== "Tab" || ref.current?.closest("[inert]")) return;
+      const selector = 'button:not(:disabled),a[href],input:not(:disabled),select:not(:disabled),textarea:not(:disabled),[tabindex="0"]';
+      const controls = [...Array.from(ref.current?.querySelectorAll<HTMLElement>(selector) ?? []), ...Array.from(ref.current?.closest("main")?.querySelectorAll<HTMLElement>(`[data-global] :is(${selector})`) ?? [])].filter(el => el.getClientRects().length > 0 && !el.closest("[inert],[hidden]"));
+      if (!controls.length) { event.preventDefault(); return; }
+      const first = controls[0], last = controls[controls.length - 1], active = document.activeElement;
+      // The save recovery banner is a sibling of the dialog, so the listener must also cover it.
+      const outsideControls = !controls.some(control => control === active);
+      if (event.shiftKey && (active === first || outsideControls)) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && (active === last || outsideControls)) { event.preventDefault(); first.focus(); }
+    };
+    document.addEventListener("keydown", trapTab);
+    return () => { cancelAnimationFrame(id); document.removeEventListener("keydown", trapTab); if (previous?.isConnected && !previous.closest("[inert]")) previous.focus({ preventScroll: true }); };
   }, [title]);
-  return <section ref={ref} data-ui className={`screen-shell ${hero ? "hero-screen" : ""}`} aria-label={title} role="dialog" aria-modal="true" onClickCapture={e => { if (performance.now() - opened.current < 180) { e.preventDefault(); e.stopPropagation(); } }} onKeyDown={e => {
-    if (e.key !== "Tab") return;
-    const controls = [...Array.from(ref.current?.querySelectorAll<HTMLElement>('button:not([disabled]),a[href],input,select,[tabindex="0"]') ?? []), ...Array.from(ref.current?.closest('main')?.querySelectorAll<HTMLElement>('[data-global] button') ?? [])];
-    if (!controls.length) { e.preventDefault(); return; }
-    const first = controls[0], last = controls[controls.length - 1];
-    if (e.shiftKey && (document.activeElement === first || document.activeElement?.tagName.match(/^H[12]$/))) { e.preventDefault(); last.focus(); }
-    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
-  }}><div className={`screen-content ${narrow ? "narrow" : ""}`}>
+  return <section ref={ref} data-ui className={`screen-shell ${hero ? "hero-screen" : ""}`} aria-label={title} role="dialog" onClickCapture={e => { if (performance.now() - opened.current < 180) { e.preventDefault(); e.stopPropagation(); } }}><div className={`screen-content ${narrow ? "narrow" : ""}`}>
     <header className="screen-heading">{eyebrow && <p className="eyebrow">{eyebrow}</p>}<h1 tabIndex={-1}>{title}</h1><span className="heading-rule" aria-hidden="true"/></header>
     {children}{footer && <footer className="screen-footer">{footer}</footer>}
   </div></section>;
 }
-function Rank({ value, max }: { value: number; max: number }) { return <span className="rank-track" aria-label={`Rank ${value} of ${max}`}>{Array.from({ length: max }, (_, i) => <span key={i} className={i < value ? "filled" : ""}/>)}</span>; }
+function Rank({ value, max }: { value: number; max: number }) { return <span className="rank-track" role="img" aria-label={`Rank ${value} of ${max}`}>{Array.from({ length: max }, (_, i) => <span key={i} className={i < value ? "filled" : ""}/>)}</span>; }
 function Stat({ label, value }: { label: string; value: string }) { return <div className="stat"><span>{label}</span><strong>{value}</strong></div>; }
 
-function Hud({ hud, onPause }: { hud: HudState; onPause: () => void }) {
+function Hud({ hud, inactive, onPause }: { hud: HudState; inactive: boolean; onPause: () => void }) {
   const hp = Math.max(0, Math.min(1, hud.hp / hud.maxHp));
-  return <div className="hud" aria-label="Hunt status">
+  return <div className="hud" inert={inactive} aria-hidden={inactive} aria-label="Hunt status">
     <div className="xp-track" role="progressbar" aria-label={`Experience, level ${hud.level}`} aria-valuenow={Math.floor(hud.xp)} aria-valuemin={0} aria-valuemax={Math.ceil(hud.xpNext)}><span style={{ width: `${Math.min(1, hud.xp / hud.xpNext) * 100}%` }}/></div>
-    <div className="hud-main"><div className="hud-health"><span className="hud-label">VITALITY <b>{Math.ceil(hud.hp)} / {hud.maxHp}</b></span><div className={`health-track ${hp < .35 ? "low" : ""}`}><span style={{ width: `${hp * 100}%` }}/></div><span className="hud-small">LV {hud.level} <span> · {gold(hud.kills)} slain</span></span></div>
+    <div className="hud-main"><div className="hud-health"><span className="hud-label">VITALITY <b>{Math.ceil(hud.hp)} / {hud.maxHp}</b></span><div role="progressbar" aria-label="Hunter health" aria-valuenow={Math.max(0, Math.ceil(hud.hp))} aria-valuemin={0} aria-valuemax={Math.ceil(hud.maxHp)} className={`health-track ${hp < .35 ? "low" : ""}`}><span style={{ width: `${hp * 100}%` }}/></div><span className="hud-small">LV {hud.level} <span> · {gold(hud.kills)} slain</span></span></div>
       <div className="hud-time"><strong>{fmtTime(hud.time)}</strong><span>{hud.finaleTime > 0 ? `DEATH +${fmtTime(hud.finaleTime)}` : hud.time < 300 ? "HARBINGER AT 05:00" : hud.time < 900 ? "HARBINGER AT 15:00" : "DEATH AT 30:00"}</span></div>
       <div className="hud-actions"><span>{gold(hud.gold)} <small>gold</small></span><button className="btn-ghost" data-ui onClick={onPause} aria-label="Pause hunt">Ⅱ <span>Pause</span></button></div>
     </div>
@@ -478,13 +535,21 @@ function upgradeBenefit(id: string, rank: number) {
 }
 
 type QaScenario = { hunter: CharacterId; minute: number; density: number; fullBuild: boolean; boss: "none" | "colossus" | "lich" | "death"; phase: RunPhase; invulnerable: boolean; seed: number };
-function QaLab({ onLaunch, onPause, onResume }: { onLaunch: (scenario: QaScenario) => void; onPause: () => void; onResume: () => void }) {
+function QaLab({ metrics, phase, onResetMetrics, onCapture, onLaunch, onPause, onResume }: { metrics: QaMetrics | null; phase: GamePhase; onResetMetrics: () => void; onCapture: () => void; onLaunch: (scenario: QaScenario) => void; onPause: () => void; onResume: () => void }) {
   const [open, setOpen] = useState(false);
   const [scenario, setScenario] = useState<QaScenario>({ hunter: "knight", minute: 0, density: 10, fullBuild: false, boss: "none", phase: "playing", invulnerable: true, seed: 42 });
   const update = <K extends keyof QaScenario>(key: K, value: QaScenario[K]) => setScenario(s => ({ ...s, [key]: value }));
   return <aside className={`qa-lab ${open ? "open" : ""}`} data-ui data-global>
     <button className="btn-ghost" aria-expanded={open} onClick={() => setOpen(!open)}>QA lab · temporary profile {open ? "−" : "+"}</button>
     {open && <div className="qa-controls"><p>No real progress is loaded or saved. These scenarios are developer-only and do not establish balanced full-run results.</p>
+      <section className="qa-metrics" aria-label="QA frame diagnostics" aria-live="off"><strong>Canvas RAF intervals · {phase}</strong>
+        <p>{metrics?.samples ? `${metrics.fps.toFixed(1)} average FPS · p50 ${metrics.p50.toFixed(1)} ms · p95 ${metrics.p95.toFixed(1)} ms · p99 ${metrics.p99.toFixed(1)} ms` : "Launch a playing scenario to collect samples."}</p>
+        <p>{metrics?.samples ?? 0} / 600 rolling samples · {metrics?.frames ?? 0} frames since reset</p>
+        {metrics && <><p>{metrics.width} × {metrics.height} CSS px · raster DPR {metrics.dpr}</p><p>Active: {metrics.enemies} enemies · {metrics.projectiles} projectiles · {metrics.pickups} pickups · {metrics.particles} particles · {metrics.effects} effects</p></>}
+        <p>Local development measurements, updated once per second. Intervals between rendered frames, not CPU or GPU cost. Pause gaps are excluded. This does not establish mobile or release-build performance.</p>
+        <button className="btn-ghost" onClick={onResetMetrics}>Reset frame samples</button>
+        <button className="btn-ghost" onClick={onCapture}>Capture battlefield PNG</button><small>Actual canvas pixels only; HUD and menus are excluded.</small>
+      </section>
       <label>Hunter<select aria-label="QA hunter" value={scenario.hunter} onChange={e => update("hunter", e.target.value as CharacterId)}>{CHARACTERS.map(c => <option value={c.id} key={c.id}>{c.name}</option>)}</select></label>
       <label>Scenario<select aria-label="QA scenario" value={scenario.phase} onChange={e => update("phase", e.target.value as RunPhase)}>{(["playing", "levelup", "chest", "evolution", "covenant", "paused", "gameover", "victory"] as const).map(phase => <option key={phase} value={phase}>{phase}</option>)}</select></label>
       <label>Minute<input type="number" aria-label="QA starting minute" min="0" max="30" value={scenario.minute} onChange={e => update("minute", Math.min(30, Math.max(0, Number(e.target.value))))}/></label>

@@ -288,6 +288,7 @@ export class Game {
   private lastT = 0;
   private hudTimer = 0;
   private grid = new Map<number | string, number[]>(); // spatial hash -> enemy indices
+  private gridDisplacement = 0; // maximum possible displacement since indexing, from persistent pulls
   private pendingChest = 0;
   levelUpsQueued = 0;
   victoryT = 0;
@@ -777,6 +778,7 @@ export class Game {
 
   private buildGrid() {
     this.grid.clear();
+    this.gridDisplacement = 0;
     const cs = 72;
     for (let i = 0; i < this.enemies.length; i++) {
       const e = this.enemies[i];
@@ -794,7 +796,7 @@ export class Game {
   /** Visit enemies near (x, y) within radius r. Return true from fn to stop. */
   private nearEnemies(x: number, y: number, r: number, fn: (e: Enemy) => boolean | void) {
     const cs = 72;
-    const padding = 50; // largest enemy radius is 24 × 1.9; broadphase includes target extent.
+    const padding = 50 + this.gridDisplacement; // target extent plus movement since the last index build
     const x0 = Math.floor((x - r - padding) / cs);
     const x1 = Math.floor((x + r + padding) / cs);
     const y0 = Math.floor((y - r - padding) / cs);
@@ -957,14 +959,17 @@ export class Game {
     const kr = 1 - (e.def.knockResist ?? 0);
     e.kx += kbX * kr;
     e.ky += kbY * kr;
-    if (opts?.slow) {
-      e.slowF = Math.min(e.slowT > 0 ? e.slowF : 1, opts.slowF ?? 0.55);
-      e.slowT = Math.max(e.slowT, opts.slow);
-    }
+    if (opts?.slow) this.applySlow(e, opts.slow, opts.slowF ?? .55);
     if (!opts?.quiet) audio.sfx("hit");
     this.spawnDmgNum(e.x + this.visualRand(-8, 8), e.y - e.radius - 4, final, crit, false);
     if (e.hp <= 0) this.killEnemy(e, true);
     return crit;
+  }
+
+  /** Stronger control replaces weaker control; weaker casts never thaw or prolong a freeze. */
+  private applySlow(e: Enemy, duration: number, factor: number) {
+    if (e.slowT <= 0 || factor < e.slowF) { e.slowF = factor; e.slowT = duration; }
+    else if (factor === e.slowF) e.slowT = Math.max(e.slowT, duration);
   }
 
   private killEnemy(e: Enemy, drops: boolean) {
@@ -1157,6 +1162,7 @@ export class Game {
     const b = this.boss;
     if (!b || this.terminal) return false;
     let final = dmg * this.stats.might;
+    if (this.covenant?.reward === "precision" && b.hp === b.maxHp) final *= 1.2;
     let crit = false;
     if (canCrit && this.random() < this.stats.critChance) {
       crit = true;
@@ -1194,7 +1200,7 @@ export class Game {
     // rewards: chest + gem shower + magnet
     this.dropPickup("chest", b.x, b.y, 0);
     for (let i = 0; i < 14; i++) {
-      this.dropPickup("gem", b.x + this.rand(-90, 90), b.y + this.rand(-90, 90), 12 * enemyXpScale(this.time));
+      this.dropPickup("gem", b.x + this.rand(-90, 90), b.y + this.rand(-90, 90), 12 * enemyXpScale(this.time) * this.stats.xpGain);
     }
     for (let i = 0; i < 10; i++) this.dropPickup("coin", b.x + this.rand(-70, 70), b.y + this.rand(-70, 70), 8);
     this.dropPickup("magnet", b.x + this.rand(-40, 40), b.y + this.rand(-40, 40), 0);
@@ -1309,7 +1315,7 @@ export class Game {
         break;
       }
       case "orb": {
-        if (this.charId === "mage" && ++this.traitCasts % 4 === 0) this.nearEnemies(this.px, this.py, 170 * this.stats.area, (e) => { e.slowT = Math.max(e.slowT, 1); e.slowF = .5; });
+        if (this.charId === "mage" && ++this.traitCasts % 4 === 0) this.nearEnemies(this.px, this.py, 170 * this.stats.area, (e) => { this.applySlow(e, 1, .5); });
         const n = L.amount;
         const base = this.nearestEnemyAngle() ?? this.random() * TAU;
         for (let i = 0; i < n; i++) {
@@ -1543,83 +1549,68 @@ export class Game {
 
       // Void Sphere pull
       if (b.kind === "orb" && b.evolved && b.aoe > 0) {
+        let pulled = false;
         this.nearEnemies(b.x, b.y, b.aoe, (e) => {
-          const dx = b.x - e.x;
-          const dy = b.y - e.y;
+          const dx = b.x - e.x, dy = b.y - e.y;
           const d = Math.hypot(dx, dy) || 1;
           e.x += (dx / d) * 95 * dt;
           e.y += (dy / d) * 95 * dt;
+          pulled = true;
         });
+        if (pulled) this.gridDisplacement += 95 * dt;
       }
       if (b.kind === "meteor") continue; // damages on impact only
-
-      // collide with enemies
-      let dead = false;
       const travel = Math.hypot(b.x - oldX, b.y - oldY);
-      this.nearEnemies((b.x + oldX) / 2, (b.y + oldY) / 2, b.radius + travel / 2, (e) => {
-        if (!segmentHits(oldX, oldY, b.x, b.y, e.x, e.y, b.radius + e.radius)) return;
-        if (b.kind !== "orb" && b.hitIds.has(e.id)) return;
-        if (b.kind !== "orb") b.hitIds.add(e.id);
-        if (b.kind === "orb") {
-          if (e.hitCooldowns.orb > 0) return;
-          e.hitCooldowns.orb = 0.3;
-          this.hitEnemy(e, b.damage, true, b.vx * 0.06, b.vy * 0.06, { quiet: true });
-          return;
+      const query = (visit: (e: Enemy) => void) => this.nearEnemies((b.x + oldX) / 2, (b.y + oldY) / 2, b.radius + travel / 2, visit);
+      if (b.kind === "orb") {
+        // Persistent fields affect every intersecting target; they do not consume pierce.
+        query((e) => {
+          if (e.hitCooldowns.orb > 0 || !segmentHits(oldX, oldY, b.x, b.y, e.x, e.y, b.radius + e.radius)) return;
+          e.hitCooldowns.orb = .3;
+          this.hitEnemy(e, b.damage, true, b.vx * .06, b.vy * .06, { quiet: true });
+        });
+        const boss = this.boss;
+        if (boss && !(boss.hitCooldowns.orb > 0) && segmentHits(oldX, oldY, b.x, b.y, boss.x, boss.y, b.radius + boss.def.radius)) {
+          boss.hitCooldowns.orb = .3;
+          this.hitBoss(b.damage, true);
         }
-        if (b.kind === "shard") {
-          this.hitEnemy(e, b.damage, true, b.vx * 0.04, b.vy * 0.04, { slow: b.slowDuration, slowF: 0.55, quiet: true });
-          b.active = false;
-          dead = true;
-          return true;
-        }
-        if (b.kind === "fireball") {
-          this.explode(b.x, b.y, b.aoe, b.damage);
-          b.active = false;
-          dead = true;
-          return true;
-        }
-        // arrow
-        const crit = this.hitEnemy(e, b.damage, true, b.vx * 0.05, b.vy * 0.05, { quiet: true });
-        if (b.evolved && crit) {
-          this.addFx({ kind: "ring", x: e.x, y: e.y, x2: 0, y2: 0, t: 0, dur: 0.25, radius: 52, color: "#ffd166", angle: 0, arc: 0 });
-          this.nearEnemies(e.x, e.y, 52, (o) => {
-            if (o !== e) this.hitEnemy(o, b.damage * 0.5, false, 0, 0, { quiet: true });
-          });
-        }
-        if (b.pierce > 0) b.pierce--;
-        else {
-          b.active = false;
-          dead = true;
-          return true;
-        }
+        continue;
+      }
+
+      // Resolve the first surface met along the sweep, independent of grid traversal,
+      // projectile direction or whether the target is a boss. Stable IDs break ties.
+      const contacts: { target: Enemy | null; id: number; t: number }[] = [];
+      query((e) => {
+        if (b.hitIds.has(e.id)) return;
+        const t = segmentHitFraction(oldX, oldY, b.x, b.y, e.x, e.y, b.radius + e.radius);
+        if (t !== null) contacts.push({ target: e, id: e.id, t });
       });
-      if (dead) continue;
-
-      // collide with boss
-      if (this.boss) {
-        if (segmentHits(oldX, oldY, b.x, b.y, this.boss.x, this.boss.y, b.radius + this.boss.def.radius) && (b.kind === "orb" || !b.hitIds.has(this.boss.id))) {
-          b.hitIds.add(this.boss.id);
-          if (b.kind === "orb") {
-            const bb = this.boss;
-            if (!(bb.hitCooldowns.orb > 0)) {
-              bb.hitCooldowns.orb = 0.3;
-              this.hitBoss(b.damage, true);
-            }
-          } else if (b.kind === "fireball") {
-            this.explode(b.x, b.y, b.aoe, b.damage);
-            b.active = false;
-          } else {
-            const bx = this.boss.x, by = this.boss.y;
-            const crit = this.hitBoss(b.damage, true);
-            if (!this.terminal && b.kind === "arrow" && b.evolved && crit) {
-              this.addFx({ kind: "ring", x: bx, y: by, x2: 0, y2: 0, t: 0, dur: .25, radius: 52, color: "#ffd166", angle: 0, arc: 0 });
-              this.nearEnemies(bx, by, 52, (e) => { this.hitEnemy(e, b.damage * .5, false, 0, 0, { quiet: true }); });
-            }
-            if (b.pierce > 0) b.pierce--;
-            else b.active = false;
-          }
+      const boss = this.boss;
+      if (boss && !b.hitIds.has(boss.id)) {
+        const t = segmentHitFraction(oldX, oldY, b.x, b.y, boss.x, boss.y, b.radius + boss.def.radius);
+        if (t !== null) contacts.push({ target: null, id: boss.id, t });
+      }
+      contacts.sort((a, other) => a.t - other.t || a.id - other.id);
+      for (const contact of contacts) {
+        if (this.terminal || !b.active) break;
+        const e = contact.target;
+        if (e ? !e.active : this.boss?.id !== contact.id) continue;
+        b.hitIds.add(contact.id);
+        if (b.kind === "fireball") {
+          this.explode(oldX + (b.x - oldX) * contact.t, oldY + (b.y - oldY) * contact.t, b.aoe, b.damage);
+          b.active = false;
+          break;
         }
-
+        const tx = e ? e.x : this.boss!.x, ty = e ? e.y : this.boss!.y;
+        const crit = e
+          ? this.hitEnemy(e, b.damage, true, b.vx * (b.kind === "shard" ? .04 : .05), b.vy * (b.kind === "shard" ? .04 : .05), b.kind === "shard" ? { slow: b.slowDuration, slowF: .55, quiet: true } : { quiet: true })
+          : this.hitBoss(b.damage, true);
+        if (!this.terminal && b.kind === "arrow" && b.evolved && crit) {
+          this.addFx({ kind: "ring", x: tx, y: ty, x2: 0, y2: 0, t: 0, dur: .25, radius: 52, color: "#ffd166", angle: 0, arc: 0 });
+          this.nearEnemies(tx, ty, 52, (other) => { if (other !== e) this.hitEnemy(other, b.damage * .5, false, 0, 0, { quiet: true }); });
+        }
+        if (b.kind !== "shard" && b.pierce > 0) b.pierce--;
+        else b.active = false;
       }
     }
   }
@@ -1946,7 +1937,10 @@ export class Game {
   }
 
   applyUpgrade(opt: UpgradeOption) {
-    if (this.phase !== "levelup" || this.terminal || this.suspended || !this.currentDraft.some((o) => o.id === opt.id && o.kind === opt.kind && o.level === opt.level)) return;
+    if (this.phase !== "levelup" || this.terminal || this.suspended || !opt) return;
+    const offered = this.currentDraft.find((o) => o.id === opt.id && o.kind === opt.kind && o.level === opt.level);
+    if (!offered || !validUpgradeForBuild(offered, this.weapons, this.passives, this.banished)) return;
+    opt = offered;
     audio.sfx("click");
     switch (opt.kind) {
       case "weapon": {
@@ -2088,7 +2082,9 @@ export class Game {
   }
 
   chooseEvolution(id: string) {
-    if (this.phase !== "evolution" || this.terminal || this.suspended || !this.currentDraft.some((o) => o.id === id)) return false;
+    if (this.phase !== "evolution" || this.terminal || this.suspended) return false;
+    const offered = this.currentDraft.find((o) => o.kind === "evolution" && o.id === id);
+    if (!offered || !validUpgradeForBuild(offered, this.weapons, this.passives, this.banished)) return false;
     this.currentDraft = []; this.openChestNow(id as WeaponId); return true;
   }
   ackChest() {
@@ -2325,6 +2321,7 @@ export class Game {
     this.enemies.forEach((e) => e.active = false); this.enemyBullets.forEach((b) => b.active = false);
     this.bullets.forEach((b) => b.active = false); this.pickups.forEach((p) => p.active = false);
     if (options.fullBuild) {
+      this.level = 80; this.xp = 0; this.xpNext = xpForLevel(this.level);
       const ids = [...new Set<WeaponId>([CHARACTERS.find((c) => c.id === this.charId)!.weapon, "aura", "frost", "orb", "lightning", "fire", "swordwave"])].slice(0, 6);
       this.weapons = ids.map((id) => ({ id, level: 8, evolved: false, timer: 0, alt: 0 }));
       this.passives = ids.map((id) => ({ id: WEAPONS[id].evolvesWith, level: 5 })); this.recomputePassives();
@@ -2399,6 +2396,18 @@ function gemTier(v: number): number {
   return 0;
 }
 
+/** Earliest segment/circle contact, including starts already inside the target. */
+function segmentHitFraction(ax: number, ay: number, bx: number, by: number, x: number, y: number, radius: number): number | null {
+  const ox = ax - x, oy = ay - y, c = ox * ox + oy * oy - radius * radius;
+  if (c <= 0) return 0;
+  const dx = bx - ax, dy = by - ay, a = dx * dx + dy * dy;
+  if (a === 0) return null;
+  const b = ox * dx + oy * dy, discriminant = b * b - a * c;
+  if (discriminant < 0) return null;
+  const t = (-b - Math.sqrt(discriminant)) / a;
+  return t >= 0 && t <= 1 ? t : null;
+}
+
 function segmentHits(ax: number, ay: number, bx: number, by: number, x: number, y: number, radius: number) {
   const dx = bx - ax, dy = by - ay;
   const t = Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / (dx * dx + dy * dy || 1)));
@@ -2406,6 +2415,23 @@ function segmentHits(ax: number, ay: number, bx: number, by: number, x: number, 
 }
 
 export type GameSnapshot = NonNullable<ReturnType<Game["exportSnapshot"]>>;
+function validUpgradeForBuild(option: UpgradeOption, weapons: WeaponState[], passives: PassiveState[], banished: Set<string>): boolean {
+  if (option.kind === "gold" || option.kind === "heal") return option.id === option.kind && option.level === 0 && option.maxLevel === 0 && !option.isNew;
+  if (option.kind === "weapon" || option.kind === "evolution") {
+    if (!Object.hasOwn(WEAPONS, option.id)) return false;
+    const def = WEAPONS[option.id], owned = weapons.find((w) => w.id === option.id);
+    if (option.maxLevel !== def.maxLevel) return false;
+    if (option.kind === "evolution") return !!owned && !owned.evolved && owned.level === def.maxLevel && option.level === def.maxLevel && option.isNew && passives.some((p) => p.id === def.evolvesWith);
+    if (banished.has(option.id)) return false;
+    return owned ? !option.isNew && !owned.evolved && owned.level < def.maxLevel && option.level === owned.level + 1 : option.isNew && option.level === 1 && weapons.length < MAX_WEAPONS;
+  }
+  if (option.kind === "passive") {
+    if (!Object.hasOwn(PASSIVES, option.id) || banished.has(option.id)) return false;
+    const def = PASSIVES[option.id], owned = passives.find((p) => p.id === option.id);
+    return option.maxLevel === def.maxLevel && (owned ? !option.isNew && owned.level < def.maxLevel && option.level === owned.level + 1 : option.isNew && option.level === 1 && passives.length < MAX_PASSIVES);
+  }
+  return false;
+}
 function validSnapshot(value: unknown): value is GameSnapshot {
   if (!value || typeof value !== "object") return false;
   const s = value as GameSnapshot;
@@ -2458,6 +2484,8 @@ function validSnapshot(value: unknown): value is GameSnapshot {
       return !own(catalog, o.id) || o.level < 1 || o.level > catalog[o.id].maxLevel || o.maxLevel !== catalog[o.id].maxLevel;
     })) return false;
     if (s.phase === "evolution" && s.currentDraft.some((o) => o.kind !== "evolution" || o.level !== 8) || s.phase === "levelup" && s.currentDraft.some((o) => o.kind === "evolution")) return false;
+    const banished = new Set(s.banished);
+    if (new Set(s.currentDraft.map((o) => `${o.kind}:${o.id}`)).size !== s.currentDraft.length || s.currentDraft.some((o) => !validUpgradeForBuild(o, s.weapons, s.passives, banished))) return false;
     return true;
   } catch { return false; }
 }
