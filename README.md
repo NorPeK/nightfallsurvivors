@@ -1,4 +1,4 @@
-# NORPEK: Nightfall Survivors
+# Nightfall Survivors
 
 A gothic, single-player horde-survival game built with TypeScript, Canvas 2D, React, and a statically exported Next.js website. Fight twelve mini-bosses throughout the night and a main boss every five minutes. Survive thirty minutes, then defeat Death to reclaim the dawn. The final fight may extend past thirty minutes.
 

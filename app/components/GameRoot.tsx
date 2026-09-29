@@ -289,7 +289,7 @@ export default function GameRoot() {
     }, "image/png"); } catch { setNotice("This browser could not capture the battlefield image."); }
   };
 
-  return <main ref={wrapRef} className="game-root" data-reduced-motion={settings.reducedMotion} data-high-contrast={settings.highContrast} data-suspended={suspended} data-save-error={Boolean(saveError)} aria-label="NORPEK: Nightfall Survivors">
+  return <main ref={wrapRef} className="game-root" data-reduced-motion={settings.reducedMotion} data-high-contrast={settings.highContrast} data-suspended={suspended} data-save-error={Boolean(saveError)} aria-label="Nightfall Survivors">
     <div inert={suspended}>
     <canvas ref={canvasRef} className="world-canvas" role="img" aria-hidden={phase !== "playing" || Boolean(panel)} aria-label="Nightfall battlefield. Move with WASD, arrow keys, or drag. Attacks fire automatically." />
     <div className="sr-only" role="status" aria-live="polite">{bossWarning ? `${bossWarning} has arrived.` : notice}</div>
@@ -304,7 +304,7 @@ export default function GameRoot() {
     {profile && <>
       {inRun && hud && !["gameover", "victory"].includes(phase) && <Hud hud={hud} inactive={phase !== "playing" || Boolean(panel)} onPause={() => gameRef.current?.pause()} />}
       {bossWarning && phase === "playing" && <div className="boss-warning" aria-hidden="true"><span>ENCOUNTER APPROACHING</span><strong>{bossWarning}</strong></div>}
-      {!panel && phase === "menu" && <Screen title="NORPEK" eyebrow="NIGHTFALL SURVIVORS" hero>
+      {!panel && phase === "menu" && <Screen title="Nightfall Survivors" eyebrow="RECLAIM THE DAWN" hero>
         <p className="hero-copy">Hold back the dark. Shape your build. Face twelve mini-bosses and six main bosses across thirty minutes. Defeat Death to reclaim the dawn.</p>
         {(profile.activeRun || (profile.rewardLedger && !profile.rewardLedger.settled)) && <div className="panel resume-card"><strong>An unfinished hunt awaits.</strong><p>{profile.activeRun ? "Resume from your last checkpoint, or end this hunt and keep banked gold." : "Your earned rewards are kept, but no resumable checkpoint is available. End this saved hunt before rebuilding your power-ups."}</p><button className="btn-gold" disabled={!profile.activeRun} onClick={() => {
           const game = gameRef.current; if (!game || !profile.activeRun) return;

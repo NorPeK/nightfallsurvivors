@@ -2,7 +2,7 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "NORPEK: Nightfall Survivors",
+  title: "Nightfall Survivors",
   description:
     "A dark gothic horde-survival game. Survive 30 minutes, slay the Reaper, claim the dawn.",
 };

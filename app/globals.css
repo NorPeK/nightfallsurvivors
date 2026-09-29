@@ -246,8 +246,12 @@ button{
   margin-bottom:24px;
 }
 .hero-screen .screen-heading h1{
-  font-size:clamp(3.2rem,12vw,6.5rem);
-  letter-spacing:.09em;
+  max-width:12ch;
+  margin-inline:auto;
+  font-size:clamp(2rem,8.5vw,4.9rem);
+  line-height:1.04;
+  letter-spacing:.045em;
+  text-transform:uppercase;
   color:#f3d9c5;
   text-shadow:0 0 60px #c2343940;
 }
@@ -1187,7 +1191,7 @@ button{
     margin-top:18px;
   }
   .hero-screen .screen-heading h1{
-    font-size:3.8rem;
+    font-size:clamp(2rem,7vw,3.4rem);
   }
   .hero-screen .hero-copy{
     font-size:.82rem;

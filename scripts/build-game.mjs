@@ -12,7 +12,7 @@ const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const target = process.argv[2] ?? 'standalone';
 if (!['standalone', 'playables', 'qa'].includes(target)) throw new Error('Target must be standalone, playables or qa.');
 const licenses = await Promise.all(['react', 'react-dom', 'scheduler'].map(async (name) => `${name}\n${await readFile(join(root, 'node_modules', name, 'LICENSE'), 'utf8')}`));
-const notices = `NORPEK: Nightfall Survivors — bundled runtime notices\n\n${licenses.join('\n\n')}`;
+const notices = `Nightfall Survivors — bundled runtime notices\n\n${licenses.join('\n\n')}`;
 const cssFile = join(root, 'app/globals.css');
 const compiledCss = await postcss([tailwind({ base: root, optimize: true })]).process(await readFile(cssFile, 'utf8'), { from: cssFile });
 if (!compiledCss.css.trim() || /@import\s+["']tailwindcss/.test(compiledCss.css)) throw new Error('Styles did not compile. No bundle was written.');
@@ -31,7 +31,7 @@ const sdk = target === 'playables' ? '<script src="https://www.youtube.com/game_
 const styles = target === 'playables' ? '<link rel="stylesheet" href="./game.css">' : `<style>${css.replace(/<\/style/gi, '<\\/style')}</style>`;
 const script = target === 'playables' ? '<script src="./game.js"></script>' : `<script>${js.replace(/<\/script/gi, '<\\/script')}</script>`;
 const html = `<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#080912"><title>NORPEK: Nightfall Survivors</title>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#080912"><title>Nightfall Survivors</title>
 ${sdk}${iconLink}${styles}</head><body><div id="root"><p style="color:#f5e9ce;background:#080912;padding:2rem;font:18px Georgia,serif">Preparing the night…</p></div>${script}</body></html>`;
 if (target === 'qa') {
   const output = join(root, 'qa-output/browser');

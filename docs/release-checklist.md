@@ -16,7 +16,7 @@ npm run build:all
 npm run validate:playables
 ```
 
-Latest local result (0.5.0, September 29): **188 normal tests passed**; the optional long Classic fixture was skipped for this shop change (last passed on 0.4.0). TypeScript, ESLint, all three production builds, QA build and archive validation passed. See [the Evolutions shop verification](evolutions-shop-0.5.0.md) for artifact hashes and observed UI results. Clean-install/alternate-time-zone reproduction was performed on the previous 0.2.1 candidate; those [historical results](reproducibility-2026-09-29.md) are not a fresh 0.5.0 reproduction claim.
+Latest local result (0.5.1, September 30): **188 normal tests passed**; the optional long Classic fixture was skipped for this presentation change (last passed on 0.4.0). TypeScript, ESLint, all three production builds, QA build and archive validation passed. See [the title update](../plan.md#title-alignment--051-september-30-2026) for current artifact hashes and responsive UI results, and [the Evolutions shop verification](evolutions-shop-0.5.0.md) for feature checks. Clean-install/alternate-time-zone reproduction was performed on the previous 0.2.1 candidate; those [historical results](reproducibility-2026-09-29.md) are not a fresh 0.5.1 reproduction claim.
 
 The normal suite covers combat defects, terminal ordering, pool saturation, input resets, persistence/migration/recovery, snapshot restoration, platform lifecycle/audio, content and archive constraints. The optional long fixture continuously steps the authored Classic schedule with an explicitly assisted build. Neither is a human balance test.
 
@@ -34,6 +34,8 @@ The [current difficulty audit](difficulty-update-0.4.0.md) records eight normal-
 The local preview CSP is deliberately stricter than the published example (no unsafe eval, remote fonts or workers). Test the exact published policy in the official environment as well. See [the test-suite guide](https://developers.google.com/youtube/gaming/playables/reference/test_suite_guide).
 
 ## UI and device matrix
+
+Version 0.5.1's renamed home screen was reviewed in Chrome at 1470×742, 320×568 and 844×390. The title fits over two lines and menu controls remain reachable. The temporary viewport override was reset afterward; no real player currency or ranks were changed.
 
 Version 0.5.0 received isolated Chrome QA checks at 1470×742: all five Evolutions purchases, maximum-rank lock, a new hunt with six slots, and an exact 31,000-gold refund. Most observations below predate this candidate. Version 0.4.0 received selected checks of one-evolution choices, reduced Meteor Storm impacts, mixed enemies and rituals. These are temporary/forced scenarios, not full-run balance evidence. Full responsive, touch, assistive-technology and production-target coverage must still be completed on the current build. Assess natural balance and sustained performance with purchased two-to-six evolution capacity separately from the previous one-slot measurements.
 

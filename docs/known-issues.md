@@ -1,6 +1,6 @@
 # Candidate limitations and open verification
 
-Version 0.5.0 is a local test candidate. See [the latest verification record](evolutions-shop-0.5.0.md) and [release checklist](release-checklist.md) for observed results.
+Version 0.5.1 is a local test candidate. See [the title update](../plan.md#title-alignment--051-september-30-2026), [Evolutions verification](evolutions-shop-0.5.0.md) and [release checklist](release-checklist.md) for observed results. The 0.5.1 change updates presentation only; prior gameplay limitations below still apply.
 
 - Physical Android/iPhone input, interruption, performance, heat and battery tests have not been performed.
 - Natural full-run balance for every hunter/save profile and dense combat readability have not been established. Headless assisted fixtures and deterministic bots do not establish those results.

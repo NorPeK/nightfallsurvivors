@@ -1,8 +1,32 @@
-# NORPEK: Nightfall Survivors — whole-game upgrade plan
+# Nightfall Survivors — whole-game upgrade plan
 
 Prepared September 27, 2026. Execution authorized September 28, 2026. This is now the living design, implementation and verification record. Baseline audit observations below describe the pre-upgrade source; use the execution ledger for current status.
 
-Reading guide: the 0.5.0 Evolutions update below is the latest candidate record. The 0.4.0 playtest response, 0.3.0 boss expansion, 0.2.1 follow-up and September 28 ledger are historical; the latter maps every original section and issue to its implementation or explicit deferral. Sections 1–22 preserve the original audit, design hypotheses and proposed roadmap. Their words “current,” “proposed” and “next” refer to the September 27 baseline. Use the latest audit and [release checklist](docs/release-checklist.md) for work still required.
+Reading guide: the 0.5.1 title update below is the latest candidate record; the 0.5.0 Evolutions section describes the current shop rules. The 0.4.0 playtest response, 0.3.0 boss expansion, 0.2.1 follow-up and September 28 ledger are historical; the latter maps every original section and issue to its implementation or explicit deferral. Sections 1–22 preserve the original audit, design hypotheses and proposed roadmap. Their words “current,” “proposed” and “next” refer to the September 27 baseline. Use the latest audit and [release checklist](docs/release-checklist.md) for work still required.
+
+## Title alignment — 0.5.1, September 30, 2026
+
+The owner selected **Nightfall Survivors** as the final game title. The home screen now displays that name prominently over two lines, with “Reclaim the dawn” above it. Website metadata, accessible game/screen labels, generated standalone/Playables titles and release text match. Responsive type sizes keep both words intact on narrow screens. The existing background, buttons and visual style remain.
+
+This is a presentation update. Combat, equipment, enemies and the NORPEK final-boss character are unchanged. Profile schema 2, engine snapshot schema 4 and the existing browser storage key remain compatible with prior progress.
+
+**Verification:** TypeScript, ESLint, all 188 regular tests (one optional long fixture skipped), website/standalone/Playables/QA builds and ZIP validation passed. Live Chrome screenshots were reviewed at 1470×742, 320×568 and 844×390; the title remains readable, menu buttons are reachable and no warning/error logs were captured. These are responsive browser checks, not physical-phone or YouTube certification results. No new tests were added for the presentation-only change.
+
+**Artifacts:** `game.html` is 432,821 bytes. Playables ZIP is 137,104 bytes, five files / 436,016 uncompressed bytes; SHA-256 `fd2b7eb9181cb8b54fca0b8ad397b9de6a213e5133ea69bbdbf1812c6744576e`. Earlier artifact hashes remain historical.
+
+The interest application remains a draft, paused at the owner's request before further game ideas are discussed. The owner confirmed rights/licensing authority and prefers applying as an individual. Required personal name and publication-history answers remain pending. The form already uses Nightfall Survivors; no submission has occurred.
+
+## YouTube onboarding — September 29, 2026
+
+The owner wants to proceed toward publication. Official documentation checked today still describes developer access as early access and the portal as invitation-only, requiring an onboarded YouTube channel. The immediate step is the [official Playables interest form](https://docs.google.com/forms/d/e/1FAIpQLSdvdQ0lgIq2369aemj1O6w8R8FwGn9O5ARRGODDDUbVINCRJQ/viewform), linked by [YouTube's developer overview](https://developers.google.com/youtube/gaming/playables). The form considers playable/finished games, requires rights and licensing authority, and does not guarantee a response or acceptance. No form has been submitted.
+
+1. Owner supplies the intended channel, publisher/developer identity and contact details, and confirms rights to the game and its content before completing the application acknowledgements.
+2. Finalize listing text and prepare accurate gameplay images and thumbnails. Use **Nightfall Survivors** as the proposed listing title; public [design requirements](https://developers.google.com/youtube/gaming/playables/certification/requirements_design) prohibit branding/logos in titles, descriptions and thumbnails. Obtain exact thumbnail specifications from the portal.
+3. Complete the recorded Android/iPhone test card, including touch, rotation, interruptions, saves, audio and sustained full-run performance. Test both default one-slot progression and purchased multi-evolution builds. Browser saves are separate from YouTube saves.
+4. After onboarding, upload the prepared production ZIP and metadata, create a release, run its Dev Link and test suite on desktop/mobile web and the Android/iOS YouTube apps, and fix any failures.
+5. Submit the verified release for certification, then follow YouTube's partner/release process. Acceptance and release timing are YouTube decisions. See the [official portal workflow](https://developers.google.com/youtube/gaming/playables/developer_portal) and [release checklist](docs/release-checklist.md).
+
+The v0.5.0 ZIP and SDK integration are prepared. Official verification, artwork, owner details and physical-device evidence remain outstanding; no upload or certification claim is made.
 
 ## Evolutions shop update — 0.5.0, September 29, 2026
 

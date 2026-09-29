@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.1 — title alignment, September 30, 2026
+
+- Aligned the home screen, website metadata, generated build titles and current documentation with the owner’s chosen name, **Nightfall Survivors**.
+- Updated the bundled runtime notice heading to match. Gameplay, progression and save formats are unchanged.
+
 ## 0.5.0 — permanent Evolutions slots, September 29, 2026
 
 The shop can now expand evolution capacity from one to six per hunt. See [the feature and verification record](docs/evolutions-shop-0.5.0.md).
